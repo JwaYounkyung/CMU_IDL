@@ -209,6 +209,7 @@ run = wandb.init(
 
 best_valacc = 0.0
 
+
 for epoch in range(config['epochs']):
 
     curr_lr = float(optimizer.param_groups[0]['lr'])
@@ -247,7 +248,7 @@ for epoch in range(config['epochs']):
       # You may find it interesting to exlplore Wandb Artifcats to version your models
 run.finish()
 
-'''
+
 def test(model,dataloader):
 
   model.eval()
@@ -269,20 +270,22 @@ def test(model,dataloader):
   batch_bar.close()
   return test_results
 
+path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
+checkpoint = torch.load(path,  map_location=device)
+model.load_state_dict(checkpoint['model_state_dict'])
 test_results = test(model, test_loader)
 
-with open("classification_early_submission.csv", "w+") as f:
+with open("results/classification_submission.csv", "w+") as f:
     f.write("id,label\n")
     for i in range(len(test_dataset)):
         f.write("{},{}\n".format(str(i).zfill(6) + ".jpg", test_results[i]))
+    
 
-'''
-'''
-known_regex = "/content/data/verification/known/*/*"
+known_regex = "data/verification/known/*/*"
 known_paths = [i.split('/')[-2] for i in sorted(glob.glob(known_regex))] 
 # This obtains the list of known identities from the known folder
 
-unknown_regex = "/content/data/verification/unknown_dev/*" #Change the directory accordingly for the test set
+unknown_regex = "data/verification/unknown_test/*" #Change the directory accordingly for the test set
 
 # We load the images from known and unknown folders
 unknown_images = [Image.open(p) for p in tqdm(sorted(glob.glob(unknown_regex)))]
@@ -295,6 +298,8 @@ transforms = torchvision.transforms.Compose([
 unknown_images = torch.stack([transforms(x) for x in unknown_images])
 known_images  = torch.stack([transforms(y) for y in known_images ])
 #Print your shapes here to understand what we have done
+print("Unknown Images: ", unknown_images.shape)
+print("Known Images: ", known_images.shape)
 
 # You can use other similarity metrics like Euclidean Distance if you wish
 similarity_metric = torch.nn.CosineSimilarity(dim= 1, eps= 1e-6) 
@@ -337,22 +342,21 @@ def eval_verification(unknown_images, known_images, model, similarity, batch_siz
     similarity_values = torch.stack([similarity(unknown_feats, known_feature) for known_feature in known_feats])
     # Print the inner list comprehension in a separate cell - what is really happening?
 
-    predictions = similarity_values.argmax(0).cpu().numpy() #Why are we doing an argmax here?
+    predictions = similarity_values.argmax(0).squeeze().cpu().numpy() #Why are we doing an argmax here?
 
     # Map argmax indices to identity strings
     pred_id_strings = [known_paths[i] for i in predictions]
     
     if mode == 'val':
-      true_ids = pd.read_csv('/content/data/verification/dev_identities.csv')['label'].tolist()
+      true_ids = pd.read_csv('data/verification/dev_identities.csv')['label'].tolist()
       accuracy = accuracy_score(pred_id_strings, true_ids)
       print("Verification Accuracy = {}".format(accuracy))
     
     return pred_id_strings
 
-pred_id_strings = eval_verification(unknown_images, known_images, model, similarity_metric, config['batch_size'], mode='val')
+pred_id_strings = eval_verification(unknown_images, known_images, model, similarity_metric, config['batch_size'], mode='test')
 
-with open("verification_early_submission.csv", "w+") as f:
+with open("results/verification_submission.csv", "w+") as f:
     f.write("id,label\n")
     for i in range(len(pred_id_strings)):
         f.write("{},{}\n".format(i, pred_id_strings[i]))
-'''
