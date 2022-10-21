@@ -1517,12 +1517,12 @@ tests = [
     #     'handler': test_upsampling_2d_correctness,
     #     'value': 2.5,
     # },
-    {
-        'name': '5.1.1 - Conv1d_stride1 | 10 points',
-        'autolab': 'Conv1d_stride1',
-        'handler': test_cnn_correctness_conv1d_stride1,
-        'value': 10,
-    },
+    # {
+    #     'name': '5.1.1 - Conv1d_stride1 | 10 points',
+    #     'autolab': 'Conv1d_stride1',
+    #     'handler': test_cnn_correctness_conv1d_stride1,
+    #     'value': 10,
+    # },
     # {
     #     'name': '5.1.2 - Conv1d | 5 points',
     #     'autolab': 'Conv1d',
@@ -1559,12 +1559,12 @@ tests = [
     #     'handler': test_MaxPool2d_stride1_correctness,
     #     'value': 10,
     # },
-    # {
-    #     'name': '5.5.2 - MaxPool2d | 5 points',
-    #     'autolab': 'MaxPool2d',
-    #     'handler': test_MaxPool2d_correctness,
-    #     'value': 5,
-    # },
+    {
+        'name': '5.5.2 - MaxPool2d | 5 points',
+        'autolab': 'MaxPool2d',
+        'handler': test_MaxPool2d_correctness,
+        'value': 5,
+    },
     # {
     #     'name': '5.5.3 - MeanPool2d_stride1 | 10 points',
     #     'autolab': 'MeanPool2d_stride1',
