@@ -207,6 +207,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
     parser = argparse.ArgumentParser(
         description="Distributed Arcface Training in Pytorch")
-    parser.add_argument("--config", type=str, default='configs/ms1mv3_r50_lr02' ,help="py config file")
+    parser.add_argument("--config", type=str, default='configs/wf42m_pfc02_8gpus_r50_bs4k.py' ,help="py config file")
     parser.add_argument("--local_rank", type=int, default=0, help="local_rank")
     main(parser.parse_args())
