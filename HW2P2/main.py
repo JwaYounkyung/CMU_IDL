@@ -15,6 +15,7 @@ import argparse
 
 from models import basic
 from backbones import get_model
+from torch import distributed
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Device: ", device)
@@ -41,6 +42,7 @@ config = {
     # Include other parameters as needed.
 }
 
+#torch.cuda.set_device(args.local_rank)
 DATA_DIR = 'data/11-785-f22-hw2p2-classification/'# TODO: Path where you have downloaded the data
 TRAIN_DIR = os.path.join(DATA_DIR, "classification/train") 
 VAL_DIR = os.path.join(DATA_DIR, "classification/dev")
