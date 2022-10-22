@@ -3,13 +3,6 @@
 
 from audioop import bias
 import numpy as np
-import os
-import sys
-
-# current = os.path.dirname(os.path.realpath(__file__))
-# parent = os.path.dirname(current)
-# sys.path.append(current)
-
 from resampling import *
 
 class Conv1d_stride1():
@@ -363,10 +356,11 @@ class Flatten():
         Return:
             Z (np.array): (batch_size, in_channels * in width)
         """
+        self.in_channels = A.shape[1]
+        self.in_width = A.shape[2]
+        Z = A.reshape(A.shape[0], -1) # TODO
 
-        Z = None # TODO
-
-        return NotImplemented
+        return Z
 
     def backward(self, dLdZ):
         """
@@ -375,8 +369,6 @@ class Flatten():
         Return:
             dLdA (np.array): (batch size, in channels, in width)
         """
+        dLdA = dLdZ.reshape(dLdZ.shape[0], self.in_channels, self.in_width) # TODO
 
-        dLdA = None #TODO
-
-        return NotImplemented
-
+        return dLdA

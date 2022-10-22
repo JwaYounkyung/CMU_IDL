@@ -35,7 +35,8 @@ class Tanh:
     
     def forward(self, Z):
     
-        self.A = np.sinh(Z)/np.cosh(Z) # TODO
+        #self.A = np.sinh(Z)/np.cosh(Z) # TODO
+        self.A = np.tanh(Z) # TODO
         
         return self.A
     

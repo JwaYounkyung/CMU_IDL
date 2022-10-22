@@ -5,17 +5,17 @@
 # return 'c'
 
 def question_1():
-    raise 'a'
+    return 'b'
 
 def question_2():
-    raise 'a'
+    return 'd'
 
 def question_3():
-    raise 'a'
+    return 'b'
 
 def question_4():
-    raise 'a'
+    return 'a'
 
 def question_5():
-    raise 'a'
+    return 'a'
 
