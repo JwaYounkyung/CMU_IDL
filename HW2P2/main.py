@@ -28,14 +28,14 @@ print("Device: ", device)
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument(
-        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/basic'))
+        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/r50'))
     args = parser.parse_args(argv)
     return args
 
 args = parse_args()
 
 config = {
-    'batch_size': 64, # Increase this if your GPU can handle it
+    'batch_size': 4, # Increase this if your GPU can handle it
     'lr': 0.1,
     'epochs': 10, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
@@ -101,7 +101,7 @@ print("Val batches: ", val_loader.__len__())
 print("Test batches: ", test_loader.__len__())
             
 # %%
-# model = basic.Network().to(device)
+#model = basic.Network().to(device)
 model = get_model("r50", dropout=0.0, fp16=True, num_features=len(train_dataset.classes)).to(device)
 summary(model, (3, 224, 224))
 
@@ -201,7 +201,7 @@ wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") #API Key is in your 
 
 # Create your wandb run
 run = wandb.init(
-    name = "early-submission", ## Wandb creates random run names if you skip this field
+    name = "r50", ## Wandb creates random run names if you skip this field
     reinit = True, ### Allows reinitalizing runs when you re-run this cell
     # run_id = ### Insert specific run id here if you want to resume a previous run
     # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
