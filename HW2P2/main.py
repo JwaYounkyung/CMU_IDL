@@ -14,6 +14,7 @@ import wandb
 import argparse
 
 from models import basic
+from backbones import get_model
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("Device: ", device)
@@ -100,7 +101,8 @@ print("Val batches: ", val_loader.__len__())
 print("Test batches: ", test_loader.__len__())
             
 # %%
-model = basic.Network().to(device)
+# model = basic.Network().to(device)
+model = get_model("r50", dropout=0.0, fp16=True, num_features=len(train_dataset.classes)).to(device)
 summary(model, (3, 224, 224))
 
 criterion = torch.nn.CrossEntropyLoss()# TODO: What loss do you need for a multi class classification problem?
