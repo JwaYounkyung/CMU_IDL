@@ -15,9 +15,8 @@ import argparse
 
 from models import basic
 from backbones import get_model
-from torch import distributed
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 print("Device: ", device)
 
 # !kaggle competitions download -c 11-785-f22-hw2p2-classification
@@ -30,15 +29,22 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument(
         '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/r50'))
+
+    # parser.add_argument('--batch_size', type=int, default=1024)
+    # parser.add_argument('--lr', type=float, default=0.01)
+    # parser.add_argument('--epoch', type=int, default=90)
+    parser.add_argument('--num_workers', type=int, default=16)
+    parser.add_argument('--gpu_ids', nargs="+", default=[2, 3])
+
     args = parser.parse_args(argv)
     return args
 
 args = parse_args()
 
 config = {
-    'batch_size': 4, # Increase this if your GPU can handle it
+    'batch_size': 32, # Increase this if your GPU can handle it
     'lr': 0.1,
-    'epochs': 10, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
+    'epochs': 50, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
 }
 
@@ -103,13 +109,18 @@ print("Val batches: ", val_loader.__len__())
 print("Test batches: ", test_loader.__len__())
             
 # %%
-#model = basic.Network().to(device)
-model = get_model("r50", dropout=0.0, fp16=True, num_features=len(train_dataset.classes)).to(device)
+#model = basic.Network()
+model = get_model("r50", dropout=0.0, fp16=True, num_features=len(train_dataset.classes))
 summary(model, (3, 224, 224))
+
+# DataParallel
+model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
+model.to(device)
 
 criterion = torch.nn.CrossEntropyLoss()# TODO: What loss do you need for a multi class classification problem?
 optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=1e-4)
 # TODO: Implement a scheduler (Optional but Highly Recommended)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=4, gamma=0.99)
 # You can try ReduceLRonPlateau, StepLR, MultistepLR, CosineAnnealing, etc.
 scaler = torch.cuda.amp.GradScaler() # Good news. We have FP16 (Mixed precision training) implemented for you
 # It is useful only in the case of compatible GPUs such as T4/V100
@@ -152,6 +163,7 @@ def train(model, dataloader, optimizer, criterion):
 
         # TODO? Depending on your choice of scheduler,
         # You may want to call some schdulers inside the train function. What are these?
+        scheduler.step()
       
         batch_bar.update() # Update tqdm bar
 
