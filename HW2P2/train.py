@@ -24,16 +24,16 @@ we have upgraded the torch to 1.9.0. torch before than 1.9.0 may not work in the
 try:
     world_size = int(os.environ["WORLD_SIZE"])
     rank = int(os.environ["RANK"])
-    distributed.init_process_group("nccl")
+    # distributed.init_process_group("nccl")
 except KeyError:
     world_size = 1
     rank = 0
-    distributed.init_process_group(
-        backend="nccl",
-        init_method="tcp://127.0.0.1:12584",
-        rank=rank,
-        world_size=world_size,
-    )
+    # distributed.init_process_group(
+    #     backend="nccl",
+    #     init_method="tcp://127.0.0.1:12584",
+    #     rank=rank,
+    #     world_size=world_size,
+    # )
 
 
 def main(args):
@@ -43,7 +43,8 @@ def main(args):
     # global control random seed
     setup_seed(seed=cfg.seed, cuda_deterministic=False)
 
-    torch.cuda.set_device(args.local_rank)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(args.local_rank)
 
     os.makedirs(cfg.output, exist_ok=True)
     init_logging(rank, cfg.output)
@@ -66,9 +67,9 @@ def main(args):
     backbone = get_model(
         cfg.network, dropout=0.0, fp16=cfg.fp16, num_features=cfg.embedding_size).cuda()
 
-    backbone = torch.nn.parallel.DistributedDataParallel(
-        module=backbone, broadcast_buffers=False, device_ids=[args.local_rank], bucket_cap_mb=16,
-        find_unused_parameters=True)
+    # backbone = torch.nn.parallel.DistributedDataParallel(
+    #     module=backbone, broadcast_buffers=False, device_ids=[args.local_rank], bucket_cap_mb=16,
+    #     find_unused_parameters=True)
 
     backbone.train()
     # FIXME using gradient checkpoint if there are some unused parameters will cause error

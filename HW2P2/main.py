@@ -33,7 +33,7 @@ def parse_args(argv=None):
     # parser.add_argument('--batch_size', type=int, default=1024)
     # parser.add_argument('--lr', type=float, default=0.01)
     # parser.add_argument('--epoch', type=int, default=90)
-    parser.add_argument('--num_workers', type=int, default=16)
+    parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--gpu_ids', nargs="+", default=[2, 3])
 
     args = parser.parse_args(argv)
@@ -42,7 +42,7 @@ def parse_args(argv=None):
 args = parse_args()
 
 config = {
-    'batch_size': 32, # Increase this if your GPU can handle it
+    'batch_size': 32*2, # Increase this if your GPU can handle it
     'lr': 0.1,
     'epochs': 50, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
@@ -54,11 +54,41 @@ TRAIN_DIR = os.path.join(DATA_DIR, "classification/train")
 VAL_DIR = os.path.join(DATA_DIR, "classification/dev")
 TEST_DIR = os.path.join(DATA_DIR, "classification/test")
 
-# Transforms using torchvision - Refer https://pytorch.org/vision/stable/transforms.html
+# Data mean and std for normalization
+'''
+data_transformer = torchvision.transforms.Compose([
+                    torchvision.transforms.GaussianBlur(kernel_size=7),
+                    torchvision.transforms.RandomHorizontalFlip(),
+                    torchvision.transforms.ToTensor()])
+train_dataset = torchvision.datasets.ImageFolder(TRAIN_DIR, transform = data_transformer)
 
+meanRGB = []
+stdRGB = []
+
+for x, _ in train_dataset:
+    meanRGB.append(np.mean(x.numpy(), axis=(1,2)))
+    stdRGB.append(np.std(x.numpy(), axis=(1,2)))        
+
+meanR = np.mean([m[0] for m in meanRGB])
+meanG = np.mean([m[1] for m in meanRGB])
+meanB = np.mean([m[2] for m in meanRGB])
+
+stdR = np.mean([s[0] for s in stdRGB])
+stdG = np.mean([s[1] for s in stdRGB])
+stdB = np.mean([s[2] for s in stdRGB])
+
+print(f"{meanR}, {meanG}, {meanB}") # 0.5130248665809631, 0.4033524692058563, 0.35215428471565247
+print(f"{stdR}, {stdG}, {stdB}") # 0.2638624310493469, 0.22904270887374878, 0.2152242362499237
+'''
+# Transforms using torchvision - Refer https://pytorch.org/vision/stable/transforms.html
 train_transforms = torchvision.transforms.Compose([ 
     # Implementing the right transforms/augmentation methods is key to improving performance.
-                    torchvision.transforms.ToTensor() 
+                    # torchvision.transforms.RandomApply(torch.nn.ModuleList([
+                    # torchvision.transforms.ColorJitter(brightness=(0.5,2), contrast=(0.5,2), saturation=(0.5,2))]), p=0.3),
+                    torchvision.transforms.GaussianBlur(kernel_size=7),
+                    torchvision.transforms.RandomHorizontalFlip(),
+                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.Normalize(mean=[0.5130248665809631, 0.4033524692058563, 0.35215428471565247], std=[0.2638624310493469, 0.22904270887374878, 0.2152242362499237]), 
                     ])
 # Most torchvision transforms are done on PIL images. So you convert it into a tensor at the end with ToTensor()
 # But there are some transforms which are performed after ToTensor() : e.g - Normalization
@@ -74,7 +104,7 @@ val_dataset = torchvision.datasets.ImageFolder(VAL_DIR, transform = val_transfor
 
 # Create data loaders
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size = config['batch_size'], 
-                                           shuffle = True,num_workers = 4, pin_memory = True)
+                                           shuffle = True,num_workers = args.num_workers, pin_memory = True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size = config['batch_size'], 
                                          shuffle = False, num_workers = 2)
 
@@ -108,20 +138,22 @@ print("Train batches: ", train_loader.__len__())
 print("Val batches: ", val_loader.__len__())
 print("Test batches: ", test_loader.__len__())
             
-# %%
+# %% model
 #model = basic.Network()
 model = get_model("r50", dropout=0.0, fp16=True, num_features=len(train_dataset.classes))
-summary(model, (3, 224, 224))
 
 # DataParallel
-model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
+#model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
 model.to(device)
+summary(model, (3, 224, 224))
 
+# %% define loss and optimizer
 criterion = torch.nn.CrossEntropyLoss()# TODO: What loss do you need for a multi class classification problem?
 optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=1e-4)
+
 # TODO: Implement a scheduler (Optional but Highly Recommended)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=4, gamma=0.99)
 # You can try ReduceLRonPlateau, StepLR, MultistepLR, CosineAnnealing, etc.
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.99)
 scaler = torch.cuda.amp.GradScaler() # Good news. We have FP16 (Mixed precision training) implemented for you
 # It is useful only in the case of compatible GPUs such as T4/V100
 
@@ -163,10 +195,10 @@ def train(model, dataloader, optimizer, criterion):
 
         # TODO? Depending on your choice of scheduler,
         # You may want to call some schdulers inside the train function. What are these?
-        scheduler.step()
       
         batch_bar.update() # Update tqdm bar
 
+    scheduler.step()
     batch_bar.close() # You need this to close the tqdm bar
 
     acc = 100 * num_correct / (config['batch_size']* len(dataloader))
@@ -210,7 +242,7 @@ def validate(model, dataloader, criterion):
 
 gc.collect() # These commands help you when you face CUDA OOM error
 torch.cuda.empty_cache()
-
+#'''
 wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") #API Key is in your wandb account, under settings (wandb.ai/settings)
 
 # Create your wandb run
@@ -263,7 +295,7 @@ for epoch in range(config['epochs']):
       wandb.save('checkpoint.pth')
       # You may find it interesting to exlplore Wandb Artifcats to version your models
 run.finish()
-
+#'''
 
 def test(model,dataloader):
 
@@ -289,13 +321,13 @@ def test(model,dataloader):
 path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
 checkpoint = torch.load(path,  map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
+#'''
 test_results = test(model, test_loader)
-
 with open("results/classification_submission.csv", "w+") as f:
     f.write("id,label\n")
     for i in range(len(test_dataset)):
         f.write("{},{}\n".format(str(i).zfill(6) + ".jpg", test_results[i]))
-    
+#'''    
 
 known_regex = "data/verification/known/*/*"
 known_paths = [i.split('/')[-2] for i in sorted(glob.glob(known_regex))] 
