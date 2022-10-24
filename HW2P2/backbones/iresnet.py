@@ -146,7 +146,7 @@ class IResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x, return_feats=False):
+    def forward(self, x):
         with torch.cuda.amp.autocast(self.fp16):
             x = self.conv1(x)
             x = self.bn1(x)
@@ -156,15 +156,12 @@ class IResNet(nn.Module):
             x = self.layer3(x)
             x = self.layer4(x)
             x = self.bn2(x)
-            feats = self.pool(x)
-            x = torch.flatten(feats, 1)
+            x = self.pool(x)
+            x = torch.flatten(x, 1)
             x = self.dropout(x)
         x = self.fc(x.float() if self.fp16 else x)
         x = self.features(x)
-        if return_feats:
-            return feats
-        else:
-            return x
+        return x
 
 
 def _iresnet(arch, block, layers, pretrained, progress, **kwargs):
