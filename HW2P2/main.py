@@ -35,7 +35,7 @@ except KeyError:
         world_size=world_size,
     )
 
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Device: ", device)
 
 # !kaggle competitions download -c 11-785-f22-hw2p2-classification
@@ -52,16 +52,8 @@ def parse_args(argv=None):
     # parser.add_argument('--batch_size', type=int, default=1024)
     # parser.add_argument('--lr', type=float, default=0.01)
     # parser.add_argument('--epoch', type=int, default=90)
-    parser.add_argument('--num_workers', type=int, default=8)
-    parser.add_argument('--gpu_ids', nargs="+", default=[2, 3])
-    parser.add_argument('--margin_list', default=(1.0, 0.0, 0.4))
-    parser.add_argument('--embedding_size', default=512)
-    parser.add_argument('--num_classes', default=7000)
-    parser.add_argument('--sample_rate', default=0.2)
-    parser.add_argument('--fp16', default=True)
-    parser.add_argument('--network', default='r50')
-    parser.add_argument("--local_rank", type=int, default=0) # device number
-    parser.add_argument("--weight_decay", type=int, default=5e-4)
+    parser.add_argument('--num_workers', type=int, default=64)
+    parser.add_argument('--gpu_ids', nargs="+", default=[0, 1, 2, 3])
 
     args = parser.parse_args(argv)
     return args
@@ -69,9 +61,9 @@ def parse_args(argv=None):
 args = parse_args()
 
 config = {
-    'batch_size': 32*2, # Increase this if your GPU can handle it
+    'batch_size': 16*len(args.gpu_ids), # Increase this if your GPU can handle it
     'lr': 0.1,
-    'epochs': 50, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
+    'epochs': 100, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
 }
 
@@ -84,46 +76,55 @@ VAL_DIR = os.path.join(DATA_DIR, "classification/dev")
 TEST_DIR = os.path.join(DATA_DIR, "classification/test")
 
 # Data mean and std for normalization
-'''
-data_transformer = torchvision.transforms.Compose([
-                    torchvision.transforms.GaussianBlur(kernel_size=7),
-                    torchvision.transforms.RandomHorizontalFlip(),
-                    torchvision.transforms.ToTensor()])
-train_dataset = torchvision.datasets.ImageFolder(TRAIN_DIR, transform = data_transformer)
 
-meanRGB = []
-stdRGB = []
+# data_transformer = torchvision.transforms.Compose([
+#                     torchvision.transforms.ToTensor()])
+# train_dataset = torchvision.datasets.ImageFolder(TRAIN_DIR, transform = data_transformer)
 
-for x, _ in train_dataset:
-    meanRGB.append(np.mean(x.numpy(), axis=(1,2)))
-    stdRGB.append(np.std(x.numpy(), axis=(1,2)))        
+# meanRGB = []
+# stdRGB = []
 
-meanR = np.mean([m[0] for m in meanRGB])
-meanG = np.mean([m[1] for m in meanRGB])
-meanB = np.mean([m[2] for m in meanRGB])
+# for x, _ in train_dataset:
+#     meanRGB.append(np.mean(x.numpy(), axis=(1,2)))
+#     stdRGB.append(np.std(x.numpy(), axis=(1,2)))        
 
-stdR = np.mean([s[0] for s in stdRGB])
-stdG = np.mean([s[1] for s in stdRGB])
-stdB = np.mean([s[2] for s in stdRGB])
+# meanR = np.mean([m[0] for m in meanRGB])
+# meanG = np.mean([m[1] for m in meanRGB])
+# meanB = np.mean([m[2] for m in meanRGB])
 
-print(f"{meanR}, {meanG}, {meanB}") # 0.5130248665809631, 0.4033524692058563, 0.35215428471565247
-print(f"{stdR}, {stdG}, {stdB}") # 0.2638624310493469, 0.22904270887374878, 0.2152242362499237
-'''
+# stdR = np.mean([s[0] for s in stdRGB])
+# stdG = np.mean([s[1] for s in stdRGB])
+# stdB = np.mean([s[2] for s in stdRGB])
+
+# print(f"{meanR}, {meanG}, {meanB}") 
+# print(f"{stdR}, {stdG}, {stdB}") 
+
+# To tensor 
+# 0.5130217671394348, 0.40335288643836975, 0.35215678811073303
+# 0.27091532945632935, 0.23659557104110718, 0.22284023463726044
+
+# blur, flip
+# 0.5130248665809631, 0.4033524692058563, 0.35215428471565247
+# 0.2638624310493469, 0.22904270887374878, 0.2152242362499237
+
 # Transforms using torchvision - Refer https://pytorch.org/vision/stable/transforms.html
 train_transforms = torchvision.transforms.Compose([ 
     # Implementing the right transforms/augmentation methods is key to improving performance.
-                    # torchvision.transforms.RandomApply(torch.nn.ModuleList([
-                    # torchvision.transforms.ColorJitter(brightness=(0.5,2), contrast=(0.5,2), saturation=(0.5,2))]), p=0.3),
+                    torchvision.transforms.RandomApply(torch.nn.ModuleList([
+                    torchvision.transforms.ColorJitter(brightness=(0.5,2), contrast=(0.5,2), saturation=(0.5,2))]), p=0.3),
                     torchvision.transforms.GaussianBlur(kernel_size=7),
                     torchvision.transforms.RandomHorizontalFlip(),
                     torchvision.transforms.ToTensor(),
-                    torchvision.transforms.Normalize(mean=[0.5130248665809631, 0.4033524692058563, 0.35215428471565247], std=[0.2638624310493469, 0.22904270887374878, 0.2152242362499237]), 
+                    torchvision.transforms.Normalize(mean=[0.5130217671394348, 0.40335288643836975, 0.35215678811073303], std=[0.27091532945632935, 0.23659557104110718, 0.22284023463726044]), 
                     ])
 # Most torchvision transforms are done on PIL images. So you convert it into a tensor at the end with ToTensor()
 # But there are some transforms which are performed after ToTensor() : e.g - Normalization
 # Normalization Tip - Do not blindly use normalization that is not suitable for this dataset
 
-val_transforms = torchvision.transforms.Compose([torchvision.transforms.ToTensor()])
+val_transforms = torchvision.transforms.Compose([
+                    torchvision.transforms.ToTensor(),
+                    torchvision.transforms.Normalize(mean=[0.5130217671394348, 0.40335288643836975, 0.35215678811073303], std=[0.27091532945632935, 0.23659557104110718, 0.22284023463726044]), 
+                    ])
 
 
 train_dataset = torchvision.datasets.ImageFolder(TRAIN_DIR, transform = train_transforms)
@@ -169,35 +170,20 @@ print("Test batches: ", test_loader.__len__())
             
 # %% model
 #model = basic.Network()
-model = get_model(args.network, dropout=0.0, fp16=args.fp16, num_features=args.embedding_size).to(device)
-model = torch.nn.parallel.DistributedDataParallel(
-    module=model, broadcast_buffers=False, device_ids=[args.local_rank], bucket_cap_mb=16,
-    find_unused_parameters=True)
+model = get_model("r100", dropout=0.1, fp16=True, num_features=len(train_dataset.classes))
 
-#model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
+# DataParallel
+model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
 model.to(device)
 #summary(model, (3, 224, 224))
 
 # %% define loss and optimizer
-criterion = torch.nn.CrossEntropyLoss()# TODO: What loss do you need for a multi class classification problem?
-margin_loss = CombinedMarginLoss(
-    64,
-    args.margin_list[0],
-    args.margin_list[1],
-    args.margin_list[2],
-    0
-)
-module_partial_fc = PartialFC(
-    margin_loss, args.embedding_size, args.num_classes,
-    args.sample_rate, args.fp16)
-
-optimizer = torch.optim.SGD(
-    params=[{"params": model.parameters()}, {"params": module_partial_fc.parameters()}], 
-    lr=config['lr'], momentum=0.9, weight_decay=args.weight_decay)
+criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)# TODO: What loss do you need for a multi class classification problem?
+optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=1e-6)
 
 # TODO: Implement a scheduler (Optional but Highly Recommended)
 # You can try ReduceLRonPlateau, StepLR, MultistepLR, CosineAnnealing, etc.
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.99)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
 scaler = torch.cuda.amp.GradScaler() # Good news. We have FP16 (Mixed precision training) implemented for you
 # It is useful only in the case of compatible GPUs such as T4/V100
 
@@ -297,7 +283,7 @@ wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") #API Key is in your 
 
 # Create your wandb run
 run = wandb.init(
-    name = "r50", ## Wandb creates random run names if you skip this field
+    name = "r100", ## Wandb creates random run names if you skip this field
     reinit = True, ### Allows reinitalizing runs when you re-run this cell
     # run_id = ### Insert specific run id here if you want to resume a previous run
     # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
@@ -338,7 +324,7 @@ for epoch in range(config['epochs']):
       print("Saving model")
       torch.save({'model_state_dict':model.state_dict(),
                   'optimizer_state_dict':optimizer.state_dict(),
-                  #'scheduler_state_dict':scheduler.state_dict(),
+                  'scheduler_state_dict':scheduler.state_dict(),
                   'val_acc': val_acc, 
                   'epoch': epoch}, path)
       best_loss = val_loss
@@ -391,7 +377,9 @@ known_images = [Image.open(p) for p in tqdm(sorted(glob.glob(known_regex)))]
 
 # Why do you need only ToTensor() here?
 transforms = torchvision.transforms.Compose([
-    torchvision.transforms.ToTensor()])
+    torchvision.transforms.ToTensor(),
+    torchvision.transforms.Normalize(mean=[0.5130217671394348, 0.40335288643836975, 0.35215678811073303], std=[0.27091532945632935, 0.23659557104110718, 0.22284023463726044]), 
+])
 
 unknown_images = torch.stack([transforms(x) for x in unknown_images])
 known_images  = torch.stack([transforms(y) for y in known_images ])

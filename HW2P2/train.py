@@ -43,8 +43,7 @@ def main(args):
     # global control random seed
     setup_seed(seed=cfg.seed, cuda_deterministic=False)
 
-    if torch.cuda.is_available():
-        torch.cuda.set_device(args.local_rank)
+    torch.cuda.set_device(args.local_rank)
 
     os.makedirs(cfg.output, exist_ok=True)
     init_logging(rank, cfg.output)
