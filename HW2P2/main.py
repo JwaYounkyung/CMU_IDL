@@ -33,7 +33,7 @@ def parse_args(argv=None):
     # parser.add_argument('--batch_size', type=int, default=1024)
     # parser.add_argument('--lr', type=float, default=0.01)
     # parser.add_argument('--epoch', type=int, default=90)
-    parser.add_argument('--num_workers', type=int, default=32)
+    parser.add_argument('--num_workers', type=int, default=64)
     parser.add_argument('--gpu_ids', nargs="+", default=[0, 1, 2, 3])
 
     args = parser.parse_args(argv)
@@ -42,9 +42,9 @@ def parse_args(argv=None):
 args = parse_args()
 
 config = {
-    'batch_size': 32*len(args.gpu_ids), # Increase this if your GPU can handle it
+    'batch_size': 16*len(args.gpu_ids), # Increase this if your GPU can handle it
     'lr': 0.1,
-    'epochs': 40, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
+    'epochs': 100, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
 }
 
@@ -149,7 +149,7 @@ print("Test batches: ", test_loader.__len__())
             
 # %% model
 #model = basic.Network()
-model = get_model("r50", dropout=0.0, fp16=True, num_features=len(train_dataset.classes))
+model = get_model("r100", dropout=0.1, fp16=True, num_features=len(train_dataset.classes))
 
 # DataParallel
 model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
@@ -157,8 +157,8 @@ model.to(device)
 #summary(model, (3, 224, 224))
 
 # %% define loss and optimizer
-criterion = torch.nn.CrossEntropyLoss()# TODO: What loss do you need for a multi class classification problem?
-optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=1e-5)
+criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)# TODO: What loss do you need for a multi class classification problem?
+optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=1e-6)
 
 # TODO: Implement a scheduler (Optional but Highly Recommended)
 # You can try ReduceLRonPlateau, StepLR, MultistepLR, CosineAnnealing, etc.
@@ -256,7 +256,7 @@ wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") #API Key is in your 
 
 # Create your wandb run
 run = wandb.init(
-    name = "r50", ## Wandb creates random run names if you skip this field
+    name = "r100", ## Wandb creates random run names if you skip this field
     reinit = True, ### Allows reinitalizing runs when you re-run this cell
     # run_id = ### Insert specific run id here if you want to resume a previous run
     # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
