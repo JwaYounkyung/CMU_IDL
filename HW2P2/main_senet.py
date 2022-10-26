@@ -15,25 +15,7 @@ import argparse
 
 from models import basic
 from backbones import get_model
-from losses import CombinedMarginLoss
-from partial_fc import PartialFC
-from torch import distributed
-
-torch.backends.cudnn.benchmark = True
-
-try:
-    world_size = int(os.environ["WORLD_SIZE"])
-    rank = int(os.environ["RANK"])
-    distributed.init_process_group("nccl")
-except KeyError:
-    world_size = 1
-    rank = 0
-    distributed.init_process_group(
-        backend="nccl",
-        init_method="tcp://127.0.0.1:12584",
-        rank=rank,
-        world_size=world_size,
-    )
+import timm
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Device: ", device)
@@ -47,13 +29,14 @@ print("Device: ", device)
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument(
-        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/r50'))
+        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/senet50'))
 
     # parser.add_argument('--batch_size', type=int, default=1024)
     # parser.add_argument('--lr', type=float, default=0.01)
     # parser.add_argument('--epoch', type=int, default=90)
-    parser.add_argument('--num_workers', type=int, default=64)
+    parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--gpu_ids', nargs="+", default=[0, 1, 2, 3])
+    parser.add_argument('--num_classes', default=7000)
 
     args = parser.parse_args(argv)
     return args
@@ -61,15 +44,13 @@ def parse_args(argv=None):
 args = parse_args()
 
 config = {
-    'batch_size': 16*len(args.gpu_ids), # Increase this if your GPU can handle it
+    'batch_size': 2*len(args.gpu_ids), # Increase this if your GPU can handle it
     'lr': 0.1,
     'epochs': 100, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
 }
 
-if torch.cuda.is_available():
-    torch.cuda.set_device(args.local_rank)
-
+#torch.cuda.set_device(args.local_rank)
 DATA_DIR = 'data/11-785-f22-hw2p2-classification/'# TODO: Path where you have downloaded the data
 TRAIN_DIR = os.path.join(DATA_DIR, "classification/train") 
 VAL_DIR = os.path.join(DATA_DIR, "classification/dev")
@@ -169,13 +150,20 @@ print("Val batches: ", val_loader.__len__())
 print("Test batches: ", test_loader.__len__())
             
 # %% model
-#model = basic.Network()
-model = get_model("r100", dropout=0.1, fp16=True, num_features=len(train_dataset.classes))
+# model = basic.Network()
+# model = get_model("r100", dropout=0.1, fp16=True, num_features=len(train_dataset.classes))
+model = timm.create_model(
+        'seresnet50',
+        pretrained=False,
+        in_chans=3,
+        num_classes=args.num_classes,
+        drop_rate=0,
+    )
 
 # DataParallel
-model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
+#model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
 model.to(device)
-#summary(model, (3, 224, 224))
+summary(model, (3, 224, 224))
 
 # %% define loss and optimizer
 criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)# TODO: What loss do you need for a multi class classification problem?
@@ -187,11 +175,10 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
 scaler = torch.cuda.amp.GradScaler() # Good news. We have FP16 (Mixed precision training) implemented for you
 # It is useful only in the case of compatible GPUs such as T4/V100
 
-# %% train
-def train(model, dataloader, optimizer, criterion, module_partial_fc):
+
+def train(model, dataloader, optimizer, criterion):
     
     model.train()
-    module_partial_fc.train().to(device)
 
     # Progress Bar 
     batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc='Train', ncols=5) 
@@ -206,13 +193,11 @@ def train(model, dataloader, optimizer, criterion, module_partial_fc):
         images, labels = images.to(device), labels.to(device)
         
         with torch.cuda.amp.autocast(): # This implements mixed precision. Thats it! 
-            local_embeddings = model(images)
-            loss = module_partial_fc(local_embeddings, labels, optimizer)
-            # outputs = model(images)
-            # loss = criterion(outputs, labels)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
 
         # Update no. of correct predictions & loss as we iterate
-        num_correct += int((torch.argmax(local_embeddings, axis=1) == labels).sum())
+        num_correct += int((torch.argmax(outputs, axis=1) == labels).sum())
         total_loss += float(loss.item())
 
         # tqdm lets you add some details so you can monitor training as you train.
@@ -223,7 +208,6 @@ def train(model, dataloader, optimizer, criterion, module_partial_fc):
             lr="{:.04f}".format(float(optimizer.param_groups[0]['lr'])))
         
         scaler.scale(loss).backward() # This is a replacement for loss.backward()
-        scaler.unscale_(optimizer)
         scaler.step(optimizer) # This is a replacement for optimizer.step()
         scaler.update() 
 
@@ -241,7 +225,7 @@ def train(model, dataloader, optimizer, criterion, module_partial_fc):
     return acc, total_loss
 
 
-def validate(model, dataloader, optimizer, criterion, module_partial_fc):
+def validate(model, dataloader, criterion):
   
     model.eval()
     batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, position=0, leave=False, desc='Val', ncols=5)
@@ -256,12 +240,10 @@ def validate(model, dataloader, optimizer, criterion, module_partial_fc):
         
         # Get model outputs
         with torch.inference_mode():
-            local_embeddings = model(images)
-            loss = module_partial_fc(local_embeddings, labels, optimizer)
-            # outputs = model(images)
-            # loss = criterion(outputs, labels)
+            outputs = model(images)
+            loss = criterion(outputs, labels)
 
-        num_correct += int((torch.argmax(local_embeddings, axis=1) == labels).sum())
+        num_correct += int((torch.argmax(outputs, axis=1) == labels).sum())
         total_loss += float(loss.item())
 
         batch_bar.set_postfix(
@@ -283,7 +265,7 @@ wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") #API Key is in your 
 
 # Create your wandb run
 run = wandb.init(
-    name = "r100", ## Wandb creates random run names if you skip this field
+    name = "senet50", ## Wandb creates random run names if you skip this field
     reinit = True, ### Allows reinitalizing runs when you re-run this cell
     # run_id = ### Insert specific run id here if you want to resume a previous run
     # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
@@ -292,13 +274,13 @@ run = wandb.init(
 )
 
 best_valacc = 0.0
-best_loss = float(‘inf’) 
+
 
 for epoch in range(config['epochs']):
 
     curr_lr = float(optimizer.param_groups[0]['lr'])
 
-    train_acc, train_loss = train(model, train_loader, optimizer, criterion, module_partial_fc)
+    train_acc, train_loss = train(model, train_loader, optimizer, criterion)
     
     print("\nEpoch {}/{}: \nTrain Acc {:.04f}%\t Train Loss {:.04f}\t Learning Rate {:.04f}".format(
         epoch + 1,
@@ -307,7 +289,7 @@ for epoch in range(config['epochs']):
         train_loss,
         curr_lr))
     
-    val_acc, val_loss = validate(model, val_loader, optimizer, criterion, module_partial_fc)
+    val_acc, val_loss = validate(model, val_loader, criterion)
     
     print("Val Acc {:.04f}%\t Val Loss {:.04f}".format(val_acc, val_loss))
 
@@ -318,7 +300,7 @@ for epoch in range(config['epochs']):
     # your learning rate differently 
 
     # #Save model in drive location if val_acc is better than best recorded val_acc
-    if val_loss <= best_loss:
+    if val_acc >= best_valacc:
       os.makedirs(args.model_dir, exist_ok=True)
       path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
       print("Saving model")
@@ -327,7 +309,7 @@ for epoch in range(config['epochs']):
                   'scheduler_state_dict':scheduler.state_dict(),
                   'val_acc': val_acc, 
                   'epoch': epoch}, path)
-      best_loss = val_loss
+      best_valacc = val_acc
       wandb.save('checkpoint.pth')
       # You may find it interesting to exlplore Wandb Artifcats to version your models
 run.finish()
