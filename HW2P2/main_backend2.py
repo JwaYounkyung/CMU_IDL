@@ -29,14 +29,19 @@ print("Device: ", device)
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument(
-        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/r50'))
-
+        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/senet50'))
+    parser.add_argument('--num_classes', default=7000)
     # parser.add_argument('--batch_size', type=int, default=1024)
     # parser.add_argument('--lr', type=float, default=0.01)
     # parser.add_argument('--epoch', type=int, default=90)
     parser.add_argument('--num_workers', type=int, default=32)
     parser.add_argument('--gpu_ids', nargs="+", default=[0, 1, 2, 3])
-    parser.add_argument('--num_classes', default=7000)
+    parser.add_argument('--dropout', default=0.1)
+    parser.add_argument('--scheduler_gamma', default=0.5)
+    parser.add_argument('--weight_decay', default=1e-5)
+    parser.add_argument('--step_size', default=10)
+    parser.add_argument('--checkpoint', default='checkpoint2.pth')
+    parser.add_argument('--wandb_name', default='senet50')
 
     args = parser.parse_args(argv)
     return args
@@ -44,7 +49,7 @@ def parse_args(argv=None):
 args = parse_args()
 
 config = {
-    'batch_size': 8*len(args.gpu_ids), # Increase this if your GPU can handle it
+    'batch_size': 64*len(args.gpu_ids), # Increase this if your GPU can handle it
     'lr': 0.1,
     'epochs': 100, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
@@ -117,7 +122,7 @@ val_dataset = torchvision.datasets.ImageFolder(VAL_DIR, transform = val_transfor
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size = config['batch_size'], 
                                            shuffle = True,num_workers = args.num_workers, pin_memory = True)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size = config['batch_size'], 
-                                         shuffle = False, num_workers = 2)
+                                         shuffle = False, num_workers = args.num_workers)
 
 # You can do this with ImageFolder as well, but it requires some tweaking
 class ClassificationTestDataset(torch.utils.data.Dataset):
@@ -137,7 +142,7 @@ class ClassificationTestDataset(torch.utils.data.Dataset):
 
 test_dataset = ClassificationTestDataset(TEST_DIR, transforms = val_transforms) #Why are we using val_transforms for Test Data?
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size = config['batch_size'], shuffle = False,
-                         drop_last = False, num_workers = 2)
+                         drop_last = False, num_workers = args.num_workers)
 
 print("Number of classes: ", len(train_dataset.classes))
 print("No. of train images: ", train_dataset.__len__())
@@ -151,14 +156,14 @@ print("Test batches: ", test_loader.__len__())
             
 # %% model
 # model = basic.Network()
-model = get_model("r50", dropout=0.1, fp16=True, num_features=len(train_dataset.classes))
-# model = timm.create_model(
-#         'seresnet50',
-#         pretrained=False,
-#         in_chans=3,
-#         num_classes=args.num_classes,
-#         drop_rate=0,
-#     )
+# model = get_model("r50", dropout=args.dropout, fp16=True, num_features=args.num_classes)
+model = timm.create_model(
+        'seresnet50',
+        pretrained=False,
+        in_chans=3,
+        num_classes=args.num_classes,
+        drop_rate=args.dropout,
+    )
 
 # DataParallel
 model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
@@ -167,11 +172,12 @@ model.to(device)
 
 # %% define loss and optimizer
 criterion = torch.nn.CrossEntropyLoss()# TODO: What loss do you need for a multi class classification problem?
-optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=1e-5)
+optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, weight_decay=args.weight_decay)
 
 # TODO: Implement a scheduler (Optional but Highly Recommended)
 # You can try ReduceLRonPlateau, StepLR, MultistepLR, CosineAnnealing, etc.
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.9)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.scheduler_gamma)
+# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['batch_size']*config['epochs'])
 scaler = torch.cuda.amp.GradScaler() # Good news. We have FP16 (Mixed precision training) implemented for you
 # It is useful only in the case of compatible GPUs such as T4/V100
 
@@ -265,7 +271,7 @@ wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") #API Key is in your 
 
 # Create your wandb run
 run = wandb.init(
-    name = "senet50", ## Wandb creates random run names if you skip this field
+    name = args.wandb_name, ## Wandb creates random run names if you skip this field
     reinit = True, ### Allows reinitalizing runs when you re-run this cell
     # run_id = ### Insert specific run id here if you want to resume a previous run
     # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
@@ -302,7 +308,7 @@ for epoch in range(config['epochs']):
     # #Save model in drive location if val_acc is better than best recorded val_acc
     if val_acc >= best_valacc:
       os.makedirs(args.model_dir, exist_ok=True)
-      path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
+      path = os.path.join(args.model_dir, args.checkpoint)
       print("Saving model")
       torch.save({'model_state_dict':model.state_dict(),
                   'optimizer_state_dict':optimizer.state_dict(),
@@ -336,7 +342,7 @@ def test(model,dataloader):
   batch_bar.close()
   return test_results
 
-path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
+path = os.path.join(args.model_dir, args.checkpoint)
 checkpoint = torch.load(path,  map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
 #'''
