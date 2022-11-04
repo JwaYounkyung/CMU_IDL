@@ -26,14 +26,19 @@ from modules.utils import set_random_seed, calculate_levenshtein
 set_random_seed(seed_num=1)
 warnings.filterwarnings('ignore')
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 print("Device: ", device)
 
 # %% Hyperparameters
 model_dir = os.path.join(os.path.dirname(__file__), 'weights/lstm')
+gpu_ids = [0, 1, 2, 3]
+batch_size = 32
+if device != 'cpu':
+    batch_size *= len(gpu_ids)
+    
 config = {
-    "batch_size": 4, # 수정
-    "num_workers": 0, # 수정
+    "batch_size": batch_size, # 수정
+    "num_workers": 24, # 수정
     
     "architecture" : "lstm",
     "embedding_size": 64,
@@ -43,7 +48,7 @@ config = {
     "bidirectional" : True,
 
     "beam_width_train" : 2,
-    "beam_width_test" : 20,
+    "beam_width_test" : 50,
     "lr" : 2e-3,
     "epochs" : 30,
     "weight_decay" : 1e-5,
@@ -121,10 +126,11 @@ input_size = x.shape[2]
 OUT_SIZE = len(LABELS)
 print(OUT_SIZE)
 
-torch.cuda.empty_cache()
 model = Network(input_size, config["embedding_size"], config["hidden_size"], config["num_layers"], 
-                config["dropout"], config["bidirectional"], OUT_SIZE).to(device)
-summary(model, x.to(device), lx)
+                config["dropout"], config["bidirectional"], OUT_SIZE)
+# model = torch.nn.DataParallel(model, device_ids=gpu_ids)
+model.to(device)
+# summary(model, x.to(device), lx)
 
 # %%
 criterion = torch.nn.CTCLoss(blank=0) 
@@ -157,7 +163,8 @@ decoder = CTCBeamDecoder(
     beam_width=config['beam_width_train'],
     num_processes=4,
     blank_id=0,
-    log_probs_input=False
+    log_probs_input=True,# LogSoftmax
+    # seq_len=length of the input
 )#TODO 
 # %% 
 # Sanity Check Levenshtein Distance: 450 < d < 800
@@ -181,6 +188,7 @@ with torch.no_grad():
       # Calculating the loss is not straightforward. Check the input format of each parameter
       
       x, y, lx, ly = data
+      x, y, lx, ly = x.to(device), y.to(device), lx.to(device), ly.to(device)
       x = x.permute(1, 0, 2)
 
       loss = criterion(x, y, lx, ly)
@@ -215,14 +223,10 @@ def train_step(model, train_loader, optimizer, criterion, scaler):
         
         with torch.cuda.amp.autocast(): # Mixed Precision 
             outputs, outputs_length = model(x, lx)
-            x = x.permute(1, 0, 2)
-            # 수정
-            # y [4, 1476, 43] -> [4, ?] with decoder
-            # outputs_length도 다시 계산해야하나? (이것도 decoder에 있는 듯)
-            # beam_results, beam_scores, timesteps, out_lens = decoder.decode(output)
-            loss = criterion(x, outputs, lx, outputs_length)
+            outputs = outputs.permute(1, 0, 2)
+            loss = criterion(outputs, y, outputs_length, ly)
 
-        total_loss += float(loss.item())
+        train_loss += float(loss.item())
 
         batch_bar.set_postfix(
             loss = f"{train_loss/ (i+1):.4f}",
@@ -234,28 +238,27 @@ def train_step(model, train_loader, optimizer, criterion, scaler):
         batch_bar.update()
     
     batch_bar.close()
-    total_loss = float(total_loss / len(train_loader)) # TODO
+    train_loss = float(train_loss / len(train_loader)) # TODO
 
     return train_loss 
 
 # %% Validation
-def evaluate(data_loader, model):
+def evaluate(model, val_loader, criterion):
     model.eval()
-    batch_bar = tqdm(total=len(data_loader), dynamic_ncols=True, leave=False, position=0, desc='Val', ncols=5)
+    batch_bar = tqdm(total=len(val_loader), dynamic_ncols=True, leave=False, position=0, desc='Val', ncols=5)
     
     val_dist = 0
     val_loss = 0
-    for i, data in enumerate(train_loader):
+    for i, data in enumerate(val_loader):
 
         x, y, lx, ly = data
         x, y, lx, ly = x.to(device), y.to(device), lx.to(device), ly.to(device)
         
         with torch.no_grad():
             outputs, outputs_length = model(x, lx)
-            x = x.permute(1, 0, 2)
-            # 수정 
-            loss = criterion(x, outputs, lx, outputs_length)
-
+            outputs = outputs.permute(1, 0, 2)
+            loss = criterion(outputs, y, outputs_length, ly)
+        
         val_loss += float(loss.item())
 
         batch_bar.set_postfix(
@@ -264,9 +267,9 @@ def evaluate(data_loader, model):
         batch_bar.update()
     
     batch_bar.close()
-    val_loss = float(val_loss / len(data_loader)) # TODO
+    val_loss = float(val_loss / len(val_loader)) # TODO
 
-    return loss, val_dist
+    return val_loss, val_dist
 
 # %% wandb 
 wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9")
@@ -297,7 +300,7 @@ for epoch in range(config["epochs"]):
         curr_lr))
     
     val_loss, val_dist = evaluate(model, val_loader, criterion)
-    print("Val Dist {:.04f}%\t Val Loss {:.04f}".format(val_dist, val_loss))
+    print("Val Loss {:.04f}\t Val Dist {:.04f}".format(val_loss, val_dist))
 
     wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
                "validation_Dist":val_dist, "learning_Rate": curr_lr})
@@ -334,39 +337,58 @@ decoder_test = CTCBeamDecoder(
     beam_width=config["beam_width_test"],
     num_processes=4,
     blank_id=0,
-    log_probs_input=False
+    log_probs_input=True
 )#TODO 
 
-# 수정
 def make_output(h, lh, decoder, LABELS):
-  
-    beam_results, beam_scores, timesteps, out_seq_len = decoder_test.decode() #TODO
-    batch_size = 0 #What is the batch size
-
+    # concatenate my predictions into strings
+    beam_results, beam_scores, timesteps, out_len = decoder.decode(h, seq_lens=lh)
+    batch_size = beam_results.shape[0] #What is the batch size
+    
     dist = 0
     preds = []
+    # y [4, 1476, 43] -> [4, ?] with decoder
     for i in range(batch_size): # Loop through each element in the batch
-
-        h_sliced = 0#TODO: Obtain the beam results
-        h_string = 0#TODO: Convert the beam results to phonemes
+        h_sliced = beam_results[i][0][:out_len[i][0]] #TODO: Obtain the beam results
+        h_string = "".join([LABELS[n] for n in h_sliced]) #TODO: Convert the beam results to phonemes
         preds.append(h_string)
         # calculate_levenshtein_distance(h_string, y[i]) #TODO: Calculate the levenshtein distance
     
     return preds
 
+def predict(model, test_loader, decoder, LABELS):
+
+    model.eval()
+    batch_bar = tqdm(total=len(test_loader), dynamic_ncols=True, position=0, leave=False, desc='Test')
+    test_results = []
+  
+    for i, data in enumerate(test_loader):
+        x, lx = data
+        x, lx = x.to(device), lx.to(device)
+
+        with torch.no_grad():
+            outputs, outputs_length = model(x, lx)
+        
+        preds = make_output(outputs, outputs_length, decoder, LABELS)
+        outputs = torch.argmax(outputs, axis=1).detach().cpu().numpy().tolist()
+        test_results.extend(preds)
+        
+        batch_bar.update()
+      
+    batch_bar.close()
+    return test_results
+
 # %% Make predictions
 #TODO:
 
-torch.cuda.empty_cache()
 path = os.path.join(model_dir, 'checkpoint' + '.pth')
 checkpoint = torch.load(path,  map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
 
-# 수정
-predictions = make_output(test_loader, model, decoder, LABELS)
+predictions = predict(model, test_loader, decoder_test, LABELS)
 
-df = pd.read_csv('/data/test-clean/transcript/random_submission.csv')
+df = pd.read_csv('data/test-clean/transcript/random_submission.csv')
 df.label = predictions
 
 df.to_csv('results/submission_early.csv', index = False)
-#!kaggle competitions submit -c <competition> -f submission.csv -m "I made it!"
+#!kaggle competitions submit -c 11-785-f22-hw3p2 -f results/submission_early.csv

@@ -13,7 +13,6 @@ class AudioDataset(torch.utils.data.Dataset):
         '''
         Initializes the dataset.
         '''
-
         # Load the directory and all files in them
         self.data_path = data_path
         self.mfcc_dir = self.data_path + partition + '/mfcc/'  #TODO
@@ -23,16 +22,12 @@ class AudioDataset(torch.utils.data.Dataset):
         self.transcript_files = sorted(os.listdir(self.transcript_dir)) #TODO
 
         # 수정
-        self.mfcc_files = self.mfcc_files[:100]
-        self.transcript_files = self.transcript_files[:100]
+        # self.mfcc_files = self.mfcc_files[:100]
+        # self.transcript_files = self.transcript_files[:100]
         assert len(self.mfcc_files) == len(self.transcript_files) 
 
         self.PHONEMES = PHONEMES
-
-        #TODO
         self.length = len(self.mfcc_files)
-        
-        #TODO
         self.phonems_ind = {k: v for v, k in enumerate(self.PHONEMES)}
 
         #TODO
@@ -40,7 +35,7 @@ class AudioDataset(torch.utils.data.Dataset):
         for i in range(0, self.length):
             mfcc = np.load(self.mfcc_dir+self.mfcc_files[i])
             # 수정 
-            # Cepstral Normalization of mfcc
+            # Cepstral Normalization of mfcc (train, test both)
             transcript = np.load(self.transcript_dir+self.transcript_files[i])
             transcript = transcript[1:-1] # Remove [SOS] and [EOS]
             transcript = [self.phonems_ind[phonem] for phonem in transcript]
@@ -111,22 +106,16 @@ class AudioDatasetTest(torch.utils.data.Dataset):
         '''
         Initializes the dataset.
         '''
-
         # Load the directory and all files in them
         self.data_path = data_path
         self.mfcc_dir = self.data_path + partition + '/mfcc/'  #TODO
-
         self.mfcc_files = sorted(os.listdir(self.mfcc_dir)) #TODO
 
         # 수정
-        self.mfcc_files = self.mfcc_files[:100]
+        # self.mfcc_files = self.mfcc_files[:100]
 
         self.PHONEMES = PHONEMES
-
-        #TODO
         self.length = len(self.mfcc_files)
-        
-        #TODO
         self.phonems_ind = {k: v for v, k in enumerate(self.PHONEMES)}
 
         #TODO
@@ -148,9 +137,7 @@ class AudioDatasetTest(torch.utils.data.Dataset):
         TODO: RETURN THE MFCC COEFFICIENTS AND ITS CORRESPONDING LABELS
         '''
         mfcc = torch.FloatTensor(self.mfccs[ind]) # TODO
-
         # 수정
-        
         return mfcc
 
 
@@ -158,14 +145,9 @@ class AudioDatasetTest(torch.utils.data.Dataset):
         '''
         TODO
         '''
-        # batch -> [(mfcc, transcript), (mfcc, transcript), ......]
-
-        # batch of input mfcc coefficients
-        batch_mfcc = [batch[i][0] for i in range(len(batch))] # TODO
-
+        batch_mfcc = [batch[i] for i in range(len(batch))] # TODO
         batch_mfcc_pad = pad_sequence(batch_mfcc, batch_first=True, padding_value=0.0) # TODO
         lengths_mfcc = [batch_mfcc[i].shape[0] for i in range(len(batch))] # TODO 
-
         # 수정
         
         return batch_mfcc_pad, torch.tensor(lengths_mfcc)

@@ -39,6 +39,12 @@ Eventually, the directory structure should look like this:
 - unpack [4, 1520, 256]
 - fc [4, 1520, 43]
 
+### Decoder 
+- outputs [B, T, 43]
+- beam_results [B, 2, 1592]
+- out_len [B, 2]
+- top beam for the batch : beam_results[i][0][:out_len[i][0]]
+
 ### 질문
 - collate_fn를 사용하면 getitem을 안하는 건가? nono 
     A. collate_fn이 getitem에서 1개씩 데이터를 불러다가 batch를 만듬    
@@ -49,3 +55,6 @@ Eventually, the directory structure should look like this:
 - validation에서도 dist를 안구하는 건가?
 
 ### debugging
+/home/work/.vscode-exts/ms-python.python-2021.2.633441544/pythonFiles/lib/python/debugpy/launcher
+
+/usr/bin/env /Users/jwa/opt/anaconda3/envs/IDL/bin/python /Users/jwa/.vscode/extensions/ms-python.python-2022.18.0/pythonFiles/lib/python/debugpy/adapter/../../debugpy/launcher 54719 -- /Users/jwa/Desktop/Code/CMUCode/DL/HW3P2/main.py 

@@ -18,15 +18,15 @@ class Network(nn.Module):
         self.classification = nn.Sequential(
             nn.Linear(hidden_size * 2 if bidirectional else hidden_size, num_classes) 
         )
-        self.logSoftmax = nn.LogSoftmax(dim=1) #TODO
+        self.logSoftmax = nn.LogSoftmax(dim=2) #TODO
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, lx):
         #TODO
-        packed = pack_padded_sequence(x, lx, batch_first=True, enforce_sorted=False)
+        packed = pack_padded_sequence(x, lx.cpu(), batch_first=True, enforce_sorted=False)
         output, (hidden, cell) = self.lstm(packed)
         x, outputs_length = pad_packed_sequence(output, batch_first=True, total_length=x.shape[1])
-        assert torch.equal(lx, outputs_length)
+        assert torch.equal(lx.cpu(), outputs_length)
         # 수정
         # x = self.dropout(x) lstm에 이미 dropout이 있어서 여기도 해야하나?
         x = self.classification(x)

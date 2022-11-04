@@ -31,6 +31,7 @@ def calculate_levenshtein(h, y, lh, ly, decoder, labels, debug = False):
         Refer the shape from the documentation
 
     '''
+    # CMUdict (phonemes) to ARPAbet
     beam_results, beam_scores, timesteps, out_lens= decoder.decode(h, seq_lens=lh)
 
     # It is not config['BATCH_SIZE'] (Try to think of an edge case)
