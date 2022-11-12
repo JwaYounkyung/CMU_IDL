@@ -3,7 +3,6 @@ x [4, 1476, 15]
 y [4, 129]
 lx [4]
 ly [4]
-
 outputs [4, 1476, 43] -> [4, ?] using CTC Beam
 
 ### Directory
@@ -54,7 +53,17 @@ Eventually, the directory structure should look like this:
 - lstm에 dropout 들어가는데 그 밖에도 dropout 함?
 - validation에서도 dist를 안구하는 건가?
 
-### debugging
-/home/work/.vscode-exts/ms-python.python-2021.2.633441544/pythonFiles/lib/python/debugpy/launcher
+# 할 일
+1. multi gpu 돌아가게 만들기
+python -m torch.distributed.launch —nproc_per_node=3 main.py
+2. train-clean-360 data 추가  
+3. embedding 코드 추가 (resnet50?)
+4. transforms
+5. calculate_levenshtein
+6. dropout 높이기
+7. normalize
 
-/usr/bin/env /Users/jwa/opt/anaconda3/envs/IDL/bin/python /Users/jwa/.vscode/extensions/ms-python.python-2022.18.0/pythonFiles/lib/python/debugpy/adapter/../../debugpy/launcher 54719 -- /Users/jwa/Desktop/Code/CMUCode/DL/HW3P2/main.py 
+ right embedding layer, recurrent layer, and classification layer - coupled with good regularization will let you cross all cutoffs.
+
+ # Possible Problem
+ 1. If maximum length of the batch is too large, it cause the lack of the memory

@@ -22,10 +22,6 @@ from modules.dataset import AudioDataset, AudioDatasetTest
 from models.basic import Network
 from modules.utils import set_random_seed, calculate_levenshtein
 
-import torch.distributed as dist
-import torch.utils.data as torchdata
-from torch.nn.parallel import DistributedDataParallel as DDP
-
 # %% Config
 set_random_seed(seed_num=1)
 warnings.filterwarnings('ignore')
@@ -34,30 +30,15 @@ device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 print("Device: ", device)
 
 # %% Hyperparameters
-local_rank, gpu_ids = 0, [0, 1, 2, 3]
+model_dir = os.path.join(os.path.dirname(__file__), 'weights/lstm')
+gpu_ids = [0, 1, 2, 3]
 batch_size = 32
 if device != 'cpu':
     batch_size *= len(gpu_ids)
-
-distributed = False
-if 'WORLD_SIZE' in os.environ:
-    gpu_no = int(os.environ['WORLD_SIZE'])
-    distributed = int(os.environ['WORLD_SIZE']) > 1
-else:
-    gpu_no = 1
-
-if distributed:
-    torch.cuda.set_device(local_rank)
-    dist.init_process_group(backend='nccl', init_method='env://')
-
-args = {
-    'model_dir': os.path.join(os.path.dirname(__file__), 'weights/lstm'),
-    'exp_name': 'lstm',
-}
     
 config = {
     "batch_size": batch_size, # 수정
-    "num_workers": 24, # 수정 mac 0
+    "num_workers": 0, # 수정 mac 0
     
     "architecture" : "lstm",
     "embedding_size": 64,
@@ -113,14 +94,9 @@ train_data = AudioDataset(root, PHONEMES, "train-clean-100", transforms=None) #T
 val_data = AudioDataset(root, PHONEMES, "dev-clean", transforms=None) #TODO
 test_data = AudioDatasetTest(root, PHONEMES, "test-clean", transforms=None) #TODO
 
-train_sampler = None
-if distributed:
-    train_sampler = torchdata.distributed.DistributedSampler(train_data)
-
 train_loader = torch.utils.data.DataLoader(train_data, num_workers= config['num_workers'],
                                            batch_size=config['batch_size'], pin_memory=True,
-                                           shuffle=(train_sampler is None), sampler=train_sampler,    
-                                           collate_fn=train_data.collate_fn)
+                                           shuffle=True, collate_fn=train_data.collate_fn)
 
 val_loader = torch.utils.data.DataLoader(val_data, num_workers=config['num_workers'],
                                          batch_size=config['batch_size'], pin_memory=True,
@@ -152,9 +128,8 @@ print(OUT_SIZE)
 
 model = Network(input_size, config["embedding_size"], config["hidden_size"], config["num_layers"], 
                 config["dropout"], config["bidirectional"], OUT_SIZE)
-if distributed:
-    model = DDP(model, device_ids=[local_rank])
-# model.to(device)
+# model = torch.nn.DataParallel(model, device_ids=gpu_ids)
+model.to(device)
 # summary(model, x.to(device), lx)
 
 # %%
@@ -311,8 +286,8 @@ for epoch in range(config["epochs"]):
     # HINT: Calculating levenshtein distance takes a long time. Do you need to do it every epoch?
     # Does the training step even need it? 
     if val_loss < best_val_loss:
-      os.makedirs(args.model_dir, exist_ok=True)
-      path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
+      os.makedirs(model_dir, exist_ok=True)
+      path = os.path.join(model_dir, 'checkpoint' + '.pth')
       print("Saving model")
       torch.save({'model_state_dict':model.state_dict(),
                   'optimizer_state_dict':optimizer.state_dict(),
@@ -382,7 +357,7 @@ def predict(model, test_loader, decoder, LABELS):
 # %% Make predictions
 #TODO:
 
-path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
+path = os.path.join(model_dir, 'checkpoint' + '.pth')
 checkpoint = torch.load(path,  map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -391,5 +366,5 @@ predictions = predict(model, test_loader, decoder_test, LABELS)
 df = pd.read_csv('data/test-clean/transcript/random_submission.csv')
 df.label = predictions
 
-df.to_csv('results/submission' + args.exp_name + '.csv', index = False)
+df.to_csv('results/submission_early.csv', index = False)
 #!kaggle competitions submit -c 11-785-f22-hw3p2 -f results/submission_early.csv
