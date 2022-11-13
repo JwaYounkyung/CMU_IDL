@@ -9,17 +9,18 @@ class AudioDataset(torch.utils.data.Dataset):
     # Hint: The data from HW1 is very similar to this HW
 
     #TODO
-    def __init__(self, data_path, PHONEMES, partition="train-clean-100", transforms=None): 
+    def __init__(self, data_path, PHONEMES, partition1, partition2, transforms=None): 
         '''
         Initializes the dataset.
         '''
         # Load the directory and all files in them
         self.data_path = data_path
-        self.mfcc_dir = self.data_path + partition + '/mfcc/'  #TODO
-        self.transcript_dir = self.data_path + partition + '/transcript/raw/' #TODO
 
-        self.mfcc_files = sorted(os.listdir(self.mfcc_dir)) #TODO
-        self.transcript_files = sorted(os.listdir(self.transcript_dir)) #TODO
+        mfcc_files1, transcript_files1 = self.file_list(partition1)
+        mfcc_files2, transcript_files2 = self.file_list(partition2)
+
+        self.mfcc_files = mfcc_files1 + mfcc_files2
+        self.transcript_files = transcript_files1 + transcript_files2
 
         # 수정
         # self.mfcc_files = self.mfcc_files[:100]
@@ -33,14 +34,26 @@ class AudioDataset(torch.utils.data.Dataset):
         #TODO
         self.mfccs, self.transcripts = [], []
         for i in range(0, self.length):
-            mfcc = np.load(self.mfcc_dir+self.mfcc_files[i])
+            mfcc = np.load(self.mfcc_files[i])
             # 수정 
             # Cepstral Normalization of mfcc (train, test both)
-            transcript = np.load(self.transcript_dir+self.transcript_files[i])
+            transcript = np.load(self.transcript_files[i])
             transcript = transcript[1:-1] # Remove [SOS] and [EOS]
             transcript = [self.phonems_ind[phonem] for phonem in transcript]
             self.mfccs.append(mfcc)
             self.transcripts.append(transcript)
+
+    def file_list(self, partition):
+        mfcc_dir = self.data_path + partition + '/mfcc/'  #TODO
+        transcript_dir = self.data_path + partition + '/transcript/raw/' #TODO
+
+        mfcc_files = sorted(os.listdir(mfcc_dir)) #TODO
+        transcript_files = sorted(os.listdir(transcript_dir)) #TODO
+
+        mfcc_files = [mfcc_dir + file for file in mfcc_files]
+        transcript_files = [transcript_dir + file for file in transcript_files]
+
+        return mfcc_files, transcript_files
 
     def __len__(self):
         '''

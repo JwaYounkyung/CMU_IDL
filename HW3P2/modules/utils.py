@@ -17,8 +17,6 @@ def calculate_levenshtein(h, y, lh, ly, decoder, labels, debug = False):
 
     if debug:
         print(f"\n----- IN LEVENSHTEIN -----\n")
-        # Add any other debug statements as you may need
-        # you may want to use debug in several places in this function
     
     # TODO: look at docs for CTC.decoder and find out what is returned here
     '''
@@ -34,9 +32,8 @@ def calculate_levenshtein(h, y, lh, ly, decoder, labels, debug = False):
     # CMUdict (phonemes) to ARPAbet
     beam_results, beam_scores, timesteps, out_lens= decoder.decode(h, seq_lens=lh)
 
-    # It is not config['BATCH_SIZE'] (Try to think of an edge case)
-    batch_size = 0 # TODO
-    distance = 0 # Initialize the distance to be 0 initially
+    batch_size = beam_results.shape[0] # TODO
+    distance = 0 
 
     for i in range(batch_size): 
         # TODO: Loop through each element in the batch
@@ -48,7 +45,14 @@ def calculate_levenshtein(h, y, lh, ly, decoder, labels, debug = False):
         # What is the point of lh and ly, why do we need these lengths
 
         # Calculate levenshtein distance using Levenshtein.distance()
-        pass
+        h_sliced = beam_results[i][0][:out_lens[i][0]]
+        h_string = "".join([labels[n] for n in h_sliced])
+
+        y_sliced = y[i][:ly[i]]
+        y_string = "".join([labels[n] for n in y_sliced])
+
+        distance += Levenshtein.distance(h_string, y_string)
+        
 
     distance /= batch_size # TODO: Uncomment this, but think about why we are doing this
 

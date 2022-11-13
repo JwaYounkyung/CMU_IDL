@@ -115,7 +115,7 @@ gc.collect()
 # %% Data Load
 # 수정 
 # train-clean-360도 같이 써야함
-train_data = AudioDataset(root, PHONEMES, "train-clean-360", transforms=None) #TODO
+train_data = AudioDataset(root, PHONEMES, "train-clean-360", "train-clean-100", transforms=None) #TODO
 val_data = AudioDataset(root, PHONEMES, "dev-clean", transforms=None) #TODO
 test_data = AudioDatasetTest(root, PHONEMES, "test-clean", transforms=None) #TODO
 
@@ -173,6 +173,19 @@ scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config['step_si
 scaler = torch.cuda.amp.GradScaler()
 
 # %% 
+decoder = CTCBeamDecoder(
+    LABELS,
+    model_path=None,
+    alpha=0,
+    beta=0,
+    cutoff_top_n=40,
+    cutoff_prob=1.0,
+    beam_width=config["beam_width_test"],
+    num_processes=4,
+    blank_id=0,
+    log_probs_input=True
+)#TODO 
+
 # Sanity Check Levenshtein Distance: 450 < d < 800
 with torch.no_grad():
   for i, data in enumerate(train_loader):
@@ -200,8 +213,8 @@ with torch.no_grad():
       loss = criterion(x, y, lx, ly)
       print(f"loss: {loss}")
 
-    #   distance = calculate_levenshtein(x, y, lx, ly, decoder, LABELS, debug = False)
-    #   print(f"lev-distance: {distance}")
+      distance = calculate_levenshtein(x, y, lx, ly, decoder, LABELS, debug = False)
+      print(f"lev-distance: {distance}")
 
       break # one iteration is enough
 
@@ -249,7 +262,7 @@ def train_step(model, train_loader, optimizer, criterion, scaler):
     return train_loss 
 
 # %% Validation
-def evaluate(model, val_loader, criterion):
+def evaluate(model, val_loader, criterion, epoch):
     model.eval()
     batch_bar = tqdm(total=len(val_loader), dynamic_ncols=True, leave=False, position=0, desc='Val', ncols=5)
     
@@ -265,6 +278,10 @@ def evaluate(model, val_loader, criterion):
             outputs = outputs.permute(1, 0, 2)
             loss = criterion(outputs, y, outputs_length, ly)
         
+        if epoch == end - 1:
+            distance = calculate_levenshtein(x, y, lx, ly, decoder, LABELS, debug = False)
+            val_dist += distance
+        
         val_loss += float(loss.item())
 
         batch_bar.set_postfix(
@@ -274,6 +291,7 @@ def evaluate(model, val_loader, criterion):
     
     batch_bar.close()
     val_loss = float(val_loss / len(val_loader)) # TODO
+    val_dist = float(val_dist / len(val_loader)) # TODO
 
     return val_loss, val_dist
 
@@ -310,7 +328,7 @@ for epoch in range(config["epochs"]):
         train_loss,
         curr_lr))
     
-    val_loss, val_dist = evaluate(model, val_loader, criterion)
+    val_loss, val_dist = evaluate(model, val_loader, criterion, epoch)
     print("Val Loss {:.04f}\t Val Dist {:.04f}".format(val_loss, val_dist))
 
     if local_rank == 1:

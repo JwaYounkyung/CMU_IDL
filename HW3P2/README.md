@@ -63,14 +63,14 @@ Eventually, the directory structure should look like this:
 - validation에서도 dist를 안구하는 건가?
 
 # 할 일
-1. multi gpu 돌아가게 만들기
+- multi gpu 돌아가게 만들기
 torchrun --nproc_per_node=4 main.py
 torchrun --nproc_per_node=4 test.py
-2. embedding with cnn and dropout 
-3. train-clean-360 data 추가  
+- embedding with cnn and dropout 
+- train-clean-360 data 추가  
+- calculate_levenshtein
 4. resnet 50?
 5. transforms
-6. calculate_levenshtein
 7. dropout 높이기
 8. normalize
 
