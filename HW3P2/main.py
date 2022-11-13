@@ -69,13 +69,13 @@ config = {
     "embedding_size2": 128,
     "hidden_size" : 128,
     "num_layers" : 2,
-    "dropout" : 0.25,
+    "dropout" : 0.4,
     "bidirectional" : True,
 
     "beam_width_train" : 2,
     "beam_width_test" : 50,
-    "lr" : 2e-3,
-    "epochs" : 30,
+    "lr" : 4e-3,
+    "epochs" : 70,
     "weight_decay" : 1e-5,
     "step_size" : 10,
     "scheduler_gamma" : 0.8,
@@ -115,7 +115,7 @@ gc.collect()
 # %% Data Load
 # 수정 
 # train-clean-360도 같이 써야함
-train_data = AudioDataset(root, PHONEMES, "train-clean-100", transforms=None) #TODO
+train_data = AudioDataset(root, PHONEMES, "train-clean-360", transforms=None) #TODO
 val_data = AudioDataset(root, PHONEMES, "dev-clean", transforms=None) #TODO
 test_data = AudioDatasetTest(root, PHONEMES, "test-clean", transforms=None) #TODO
 
@@ -288,9 +288,10 @@ def wandb_init():
         project = "hw3p2-ablations", ### Project should be created in your wandb account 
         config = config ### Wandb Config for your run
     )
+    return run
 
 if local_rank == 1:
-    wandb_init()
+    run = wandb_init()
 
 # %% Train Loop
 torch.cuda.empty_cache()
@@ -334,7 +335,8 @@ for epoch in range(config["epochs"]):
       if local_rank == 1:
         wandb.save('checkpoint.pth')
 
-run.finish()
+if local_rank == 1:
+    run.finish()
 
 # %% Inference
 # Follow the steps below:

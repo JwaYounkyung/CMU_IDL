@@ -65,6 +65,7 @@ Eventually, the directory structure should look like this:
 # 할 일
 1. multi gpu 돌아가게 만들기
 torchrun --nproc_per_node=4 main.py
+torchrun --nproc_per_node=4 test.py
 2. embedding with cnn and dropout 
 3. train-clean-360 data 추가  
 4. resnet 50?

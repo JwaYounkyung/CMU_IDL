@@ -22,26 +22,51 @@ from modules.dataset import AudioDataset, AudioDatasetTest
 from models.basic import Network
 from modules.utils import set_random_seed, calculate_levenshtein
 
+import torch.distributed as dist
+import torch.utils.data as torchdata
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 # %% Config
 set_random_seed(seed_num=1)
 warnings.filterwarnings('ignore')
 
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-print("Device: ", device)
-
 # %% Hyperparameters
-model_dir = os.path.join(os.path.dirname(__file__), 'weights/lstm')
-gpu_ids = [0, 1, 2, 3]
+local_rank, gpu_ids = 0, [0, 1, 2, 3]
 batch_size = 32
+
+# os.environ["CUDA_VISIBLE_DEVICES"]= "0,1,2,3"
+distributed = True
+if distributed:
+    gpu_no = len(gpu_ids)
+else:
+    gpu_no = 1
+
+try:
+    local_rank = int(os.environ["LOCAL_RANK"])
+except:
+    pass
+
+device = f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu'
+if distributed and device != 'cpu':
+    torch.cuda.set_device(local_rank)
+    dist.init_process_group(backend='nccl', init_method='env://')
+    print('local_rank', local_rank)
+
 if device != 'cpu':
     batch_size *= len(gpu_ids)
+
+args = {
+    'model_dir': os.path.join(os.path.dirname(__file__), 'weights/lstm'),
+    'exp_name': 'lstm',
+}
     
 config = {
     "batch_size": batch_size, # 수정
-    "num_workers": 24, # 수정
+    "num_workers": 24, # 수정 mac 0
     
     "architecture" : "lstm",
-    "embedding_size": 64,
+    "embedding_size1": 64,
+    "embedding_size2": 128,
     "hidden_size" : 128,
     "num_layers" : 2,
     "dropout" : 0.25,
@@ -107,13 +132,13 @@ input_size = x_test.shape[2]
 
 # %% Model Config
 OUT_SIZE = len(LABELS)
-print(OUT_SIZE)
 
-model = Network(input_size, config["embedding_size"], config["hidden_size"], config["num_layers"], 
+model = Network(input_size, config["embedding_size1"], config["embedding_size2"], config["hidden_size"], config["num_layers"], 
                 config["dropout"], config["bidirectional"], OUT_SIZE)
-# model = torch.nn.DataParallel(model, device_ids=gpu_ids)
 model.to(device)
-# summary(model, x.to(device), lx)
+if distributed:
+    model = DDP(model, device_ids=[local_rank])
+# summary(model, x_test.to(device), lx_test)
 
 # %%
 criterion = torch.nn.CTCLoss(blank=0) 
@@ -185,7 +210,7 @@ def predict(model, test_loader, decoder, LABELS):
 # %% Make predictions
 #TODO:
 
-path = os.path.join(model_dir, 'checkpoint' + '.pth')
+path = os.path.join(args['model_dir'], 'checkpoint' + '.pth')
 checkpoint = torch.load(path,  map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -194,5 +219,5 @@ predictions = predict(model, test_loader, decoder_test, LABELS)
 df = pd.read_csv('data/test-clean/transcript/random_submission.csv')
 df.label = predictions
 
-df.to_csv('results/submission_early.csv', index = False)
+df.to_csv('results/submission' + args['exp_name'] + '.csv', index = False)
 #!kaggle competitions submit -c 11-785-f22-hw3p2 -f results/submission_early.csv
