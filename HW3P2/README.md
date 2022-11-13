@@ -55,13 +55,14 @@ Eventually, the directory structure should look like this:
 
 # 할 일
 1. multi gpu 돌아가게 만들기
-python -m torch.distributed.launch —nproc_per_node=3 main.py
-2. train-clean-360 data 추가  
-3. embedding 코드 추가 (resnet50?)
-4. transforms
-5. calculate_levenshtein
-6. dropout 높이기
-7. normalize
+torchrun --nproc_per_node=4 main.py
+2. embedding with cnn and dropout 
+3. train-clean-360 data 추가  
+4. resnet 50?
+5. transforms
+6. calculate_levenshtein
+7. dropout 높이기
+8. normalize
 
  right embedding layer, recurrent layer, and classification layer - coupled with good regularization will let you cross all cutoffs.
 

@@ -14,8 +14,8 @@ import os
 import datetime
 
 import Levenshtein
-# import ctcdecode
-# from ctcdecode import CTCBeamDecoder
+import ctcdecode
+from ctcdecode import CTCBeamDecoder
 
 import warnings
 from modules.dataset import AudioDataset, AudioDatasetTest
@@ -30,25 +30,26 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 set_random_seed(seed_num=1)
 warnings.filterwarnings('ignore')
 
-device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-print("Device: ", device)
-
 # %% Hyperparameters
 local_rank, gpu_ids = 0, [0, 1, 2, 3]
 batch_size = 32
-if device != 'cpu':
-    batch_size *= len(gpu_ids)
 
-distributed = False
-if 'WORLD_SIZE' in os.environ:
-    gpu_no = int(os.environ['WORLD_SIZE'])
-    distributed = int(os.environ['WORLD_SIZE']) > 1
+# os.environ["CUDA_VISIBLE_DEVICES"]= "0,1,2,3"
+distributed = True
+if distributed:
+    gpu_no = len(gpu_ids)
 else:
     gpu_no = 1
 
-if distributed:
+local_rank = int(os.environ["LOCAL_RANK"])
+device = f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu'
+if distributed and device != 'cpu':
     torch.cuda.set_device(local_rank)
     dist.init_process_group(backend='nccl', init_method='env://')
+    print('local_rank', local_rank)
+
+if device != 'cpu':
+    batch_size *= len(gpu_ids)
 
 args = {
     'model_dir': os.path.join(os.path.dirname(__file__), 'weights/lstm'),
@@ -148,13 +149,12 @@ input_size = x.shape[2]
 
 # %% Model Config
 OUT_SIZE = len(LABELS)
-print(OUT_SIZE)
 
 model = Network(input_size, config["embedding_size"], config["hidden_size"], config["num_layers"], 
                 config["dropout"], config["bidirectional"], OUT_SIZE)
+model.to(device)
 if distributed:
     model = DDP(model, device_ids=[local_rank])
-# model.to(device)
 # summary(model, x.to(device), lx)
 
 # %%
@@ -273,15 +273,19 @@ def evaluate(model, val_loader, criterion):
     return val_loss, val_dist
 
 # %% wandb 
-wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9")
-run = wandb.init(
-    name = "early-submission", ## Wandb creates random run names if you skip this field
-    reinit = True, ### Allows reinitalizing runs when you re-run this cell
-    # run_id = ### Insert specific run id here if you want to resume a previous run
-    # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
-    project = "hw3p2-ablations", ### Project should be created in your wandb account 
-    config = config ### Wandb Config for your run
-)
+def wandb_init():
+    wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9")
+    run = wandb.init(
+        name = "lstm", ## Wandb creates random run names if you skip this field
+        reinit = True, ### Allows reinitalizing runs when you re-run this cell
+        # run_id = ### Insert specific run id here if you want to resume a previous run
+        # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
+        project = "hw3p2-ablations", ### Project should be created in your wandb account 
+        config = config ### Wandb Config for your run
+    )
+
+if local_rank == 0:
+    wandb_init()
 
 # %% Train Loop
 torch.cuda.empty_cache()
@@ -303,16 +307,17 @@ for epoch in range(config["epochs"]):
     val_loss, val_dist = evaluate(model, val_loader, criterion)
     print("Val Loss {:.04f}\t Val Dist {:.04f}".format(val_loss, val_dist))
 
-    wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
-               "validation_Dist":val_dist, "learning_Rate": curr_lr})
+    if local_rank == 0:
+        wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
+                "validation_Dist":val_dist, "learning_Rate": curr_lr})
     
     scheduler.step()
     # 수정
     # HINT: Calculating levenshtein distance takes a long time. Do you need to do it every epoch?
     # Does the training step even need it? 
     if val_loss < best_val_loss:
-      os.makedirs(args.model_dir, exist_ok=True)
-      path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
+      os.makedirs(args['model_dir'], exist_ok=True)
+      path = os.path.join(args['model_dir'], 'checkpoint' + '.pth')
       print("Saving model")
       torch.save({'model_state_dict':model.state_dict(),
                   'optimizer_state_dict':optimizer.state_dict(),
@@ -320,7 +325,9 @@ for epoch in range(config["epochs"]):
                   'val_loss': val_loss, 
                   'epoch': epoch}, path)
       best_val_loss = val_loss
-      wandb.save('checkpoint.pth')
+
+      if local_rank == 0:
+        wandb.save('checkpoint.pth')
 
 run.finish()
 
@@ -382,7 +389,7 @@ def predict(model, test_loader, decoder, LABELS):
 # %% Make predictions
 #TODO:
 
-path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
+path = os.path.join(args['model_dir'], 'checkpoint' + '.pth')
 checkpoint = torch.load(path,  map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -391,5 +398,5 @@ predictions = predict(model, test_loader, decoder_test, LABELS)
 df = pd.read_csv('data/test-clean/transcript/random_submission.csv')
 df.label = predictions
 
-df.to_csv('results/submission' + args.exp_name + '.csv', index = False)
+df.to_csv('results/submission' + args['exp_name'] + '.csv', index = False)
 #!kaggle competitions submit -c 11-785-f22-hw3p2 -f results/submission_early.csv
