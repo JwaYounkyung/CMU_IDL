@@ -4,25 +4,40 @@ from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_se
 
 class Network(nn.Module):
 
-    def __init__(self, input_size, embedding_size, hidden_size, num_layers, dropout, bidirectional, num_classes):
+    def __init__(self, input_size, embedding_size1, embedding_size2, hidden_size, num_layers, dropout, bidirectional, num_classes):
 
         super(Network, self).__init__()
 
         # 수정
-        # Adding some sort of embedding layer or feature extractor might help performance.
-        # self.embedding = nn.Embedding(input_size, embedding_size)
+        self.embedding1 = nn.Sequential(
+            nn.Conv1d(input_size, embedding_size1, 3, 1, padding=1), # in_channel, out_channel, kernel_size, stride
+            nn.BatchNorm1d(num_features=embedding_size1),
+            nn.PReLU(num_parameters=embedding_size1),
+            nn.Dropout(dropout)
+        )
+        self.embedding2 = nn.Sequential(
+            nn.Conv1d(embedding_size1, embedding_size2, 3, 1, padding=1), # in_channel, out_channel, kernel_size, stride
+            nn.BatchNorm1d(num_features=embedding_size2),
+            nn.PReLU(num_parameters=embedding_size2),
+            nn.Dropout(dropout)
+        )
 
         # TODO 
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, batch_first=True,
+        self.lstm = nn.LSTM(embedding_size2, hidden_size, num_layers=num_layers, batch_first=True,
                             dropout=dropout, bidirectional=bidirectional)
         self.classification = nn.Sequential(
             nn.Linear(hidden_size * 2 if bidirectional else hidden_size, num_classes) 
         )
         self.logSoftmax = nn.LogSoftmax(dim=2) #TODO
-        self.dropout = nn.Dropout(dropout)
+        
 
     def forward(self, x, lx):
         #TODO
+        x = x.permute(0, 2, 1)
+        x = self.embedding1(x)
+        x = self.embedding2(x)
+        x = x.permute(0, 2, 1)
+
         packed = pack_padded_sequence(x, lx.cpu(), batch_first=True, enforce_sorted=False)
         output, (hidden, cell) = self.lstm(packed)
         x, outputs_length = pad_packed_sequence(output, batch_first=True, total_length=x.shape[1])

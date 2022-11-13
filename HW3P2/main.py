@@ -41,7 +41,11 @@ if distributed:
 else:
     gpu_no = 1
 
-local_rank = int(os.environ["LOCAL_RANK"])
+try:
+    local_rank = int(os.environ["LOCAL_RANK"])
+except:
+    pass
+
 device = f'cuda:{local_rank}' if torch.cuda.is_available() else 'cpu'
 if distributed and device != 'cpu':
     torch.cuda.set_device(local_rank)
@@ -61,7 +65,8 @@ config = {
     "num_workers": 24, # 수정 mac 0
     
     "architecture" : "lstm",
-    "embedding_size": 64,
+    "embedding_size1": 64,
+    "embedding_size2": 128,
     "hidden_size" : 128,
     "num_layers" : 2,
     "dropout" : 0.25,
@@ -150,7 +155,7 @@ input_size = x.shape[2]
 # %% Model Config
 OUT_SIZE = len(LABELS)
 
-model = Network(input_size, config["embedding_size"], config["hidden_size"], config["num_layers"], 
+model = Network(input_size, config["embedding_size1"], config["embedding_size2"], config["hidden_size"], config["num_layers"], 
                 config["dropout"], config["bidirectional"], OUT_SIZE)
 model.to(device)
 if distributed:
@@ -284,7 +289,7 @@ def wandb_init():
         config = config ### Wandb Config for your run
     )
 
-if local_rank == 0:
+if local_rank == 1:
     wandb_init()
 
 # %% Train Loop
@@ -307,7 +312,7 @@ for epoch in range(config["epochs"]):
     val_loss, val_dist = evaluate(model, val_loader, criterion)
     print("Val Loss {:.04f}\t Val Dist {:.04f}".format(val_loss, val_dist))
 
-    if local_rank == 0:
+    if local_rank == 1:
         wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
                 "validation_Dist":val_dist, "learning_Rate": curr_lr})
     
@@ -326,7 +331,7 @@ for epoch in range(config["epochs"]):
                   'epoch': epoch}, path)
       best_val_loss = val_loss
 
-      if local_rank == 0:
+      if local_rank == 1:
         wandb.save('checkpoint.pth')
 
 run.finish()

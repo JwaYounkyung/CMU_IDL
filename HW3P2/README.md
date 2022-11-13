@@ -38,6 +38,15 @@ Eventually, the directory structure should look like this:
 - unpack [4, 1520, 256]
 - fc [4, 1520, 43]
 
+### Model 2 embedding 2
+- input [4, 1520, 15], lx [1117, 1498, 1520, 1075]
+- embedding1 [4, 1520, 64]
+- embedding2 [4, 1520, 128]
+- packed [5210, 128]
+- packed lstm [5210, 256]
+- unpack [4, 1520, 256]
+- fc [4, 1520, 43]
+
 ### Decoder 
 - outputs [B, T, 43]
 - beam_results [B, 2, 1592]
