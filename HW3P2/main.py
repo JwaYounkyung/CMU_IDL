@@ -67,7 +67,8 @@ config = {
     "architecture" : "lstm",
     "embedding_size1": 64,
     "embedding_size2": 128,
-    "hidden_size" : 128,
+    "embedding_size3": 256,
+    "hidden_size" : 256,
     "num_layers" : 5,
     "dropout" : 0.3,
     "bidirectional" : True,
@@ -155,7 +156,7 @@ input_size = x.shape[2]
 # %% Model Config
 OUT_SIZE = len(LABELS)
 
-model = Network(input_size, config["embedding_size1"], config["embedding_size2"], config["hidden_size"], config["num_layers"], 
+model = Network(input_size, config["embedding_size1"], config["embedding_size2"], config["embedding_size3"], config["hidden_size"], config["num_layers"], 
                 config["dropout"], config["bidirectional"], OUT_SIZE)
 model.to(device)
 if distributed:
