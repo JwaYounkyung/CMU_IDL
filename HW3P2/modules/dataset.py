@@ -9,18 +9,18 @@ class AudioDataset(torch.utils.data.Dataset):
     # Hint: The data from HW1 is very similar to this HW
 
     #TODO
-    def __init__(self, data_path, PHONEMES, partition1, partition2, transforms=None): 
+    def __init__(self, data_path, PHONEMES, partitions, transforms=None): 
         '''
         Initializes the dataset.
         '''
         # Load the directory and all files in them
         self.data_path = data_path
 
-        mfcc_files1, transcript_files1 = self.file_list(partition1)
-        mfcc_files2, transcript_files2 = self.file_list(partition2)
-
-        self.mfcc_files = mfcc_files1 + mfcc_files2
-        self.transcript_files = transcript_files1 + transcript_files2
+        self.mfcc_files, self.transcript_files = [], []
+        for partition in partitions:
+            mfccs, transcripts = self.file_list(partition)
+            self.mfcc_files.extend(mfccs)
+            self.transcript_files.extend(transcripts)
 
         # 수정
         # self.mfcc_files = self.mfcc_files[:100]

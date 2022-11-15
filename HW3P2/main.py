@@ -68,16 +68,16 @@ config = {
     "embedding_size1": 64,
     "embedding_size2": 128,
     "hidden_size" : 128,
-    "num_layers" : 2,
-    "dropout" : 0.4,
+    "num_layers" : 5,
+    "dropout" : 0.3,
     "bidirectional" : True,
 
     "beam_width_train" : 2,
     "beam_width_test" : 50,
     "lr" : 4e-3,
-    "epochs" : 70,
+    "epochs" : 100,
     "weight_decay" : 1e-5,
-    "step_size" : 10,
+    "step_size" : 7,
     "scheduler_gamma" : 0.8,
     } 
 
@@ -115,8 +115,8 @@ gc.collect()
 # %% Data Load
 # 수정 
 # train-clean-360도 같이 써야함
-train_data = AudioDataset(root, PHONEMES, "train-clean-360", "train-clean-100", transforms=None) #TODO
-val_data = AudioDataset(root, PHONEMES, "dev-clean", transforms=None) #TODO
+train_data = AudioDataset(root, PHONEMES, ["train-clean-360", "train-clean-100"], transforms=None) #TODO
+val_data = AudioDataset(root, PHONEMES, ["dev-clean"], transforms=None) #TODO
 test_data = AudioDatasetTest(root, PHONEMES, "test-clean", transforms=None) #TODO
 
 train_sampler = None
@@ -180,7 +180,7 @@ decoder = CTCBeamDecoder(
     beta=0,
     cutoff_top_n=40,
     cutoff_prob=1.0,
-    beam_width=config["beam_width_test"],
+    beam_width=2,#config["beam_width_test"],
     num_processes=4,
     blank_id=0,
     log_probs_input=True
@@ -208,13 +208,15 @@ with torch.no_grad():
       
       x, y, lx, ly = data
       x, y, lx, ly = x.to(device), y.to(device), lx.to(device), ly.to(device)
+
+    #   distance = calculate_levenshtein(x, y, lx, ly, decoder, LABELS, debug = False)
+    #   print(f"lev-distance: {distance}")
       x = x.permute(1, 0, 2)
 
       loss = criterion(x, y, lx, ly)
       print(f"loss: {loss}")
 
-      distance = calculate_levenshtein(x, y, lx, ly, decoder, LABELS, debug = False)
-      print(f"lev-distance: {distance}")
+
 
       break # one iteration is enough
 
@@ -278,9 +280,9 @@ def evaluate(model, val_loader, criterion, epoch):
             outputs = outputs.permute(1, 0, 2)
             loss = criterion(outputs, y, outputs_length, ly)
         
-        if epoch == end - 1:
-            distance = calculate_levenshtein(x, y, lx, ly, decoder, LABELS, debug = False)
-            val_dist += distance
+        # if epoch == end - 1:
+        #     distance = calculate_levenshtein(x, y, lx, ly, decoder, LABELS, debug = False)
+        #     val_dist += distance
         
         val_loss += float(loss.item())
 

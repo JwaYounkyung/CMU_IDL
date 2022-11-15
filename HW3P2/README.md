@@ -68,6 +68,10 @@ torchrun --nproc_per_node=4 main.py
 torchrun --nproc_per_node=4 test.py
 - embedding with cnn and dropout 
 - train-clean-360 data 추가  
+- scheduler 
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=20, factor=0.5, verbose=True)
+
+
 - calculate_levenshtein
 4. resnet 50?
 5. transforms

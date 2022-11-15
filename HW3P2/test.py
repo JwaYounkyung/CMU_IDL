@@ -68,16 +68,16 @@ config = {
     "embedding_size1": 64,
     "embedding_size2": 128,
     "hidden_size" : 128,
-    "num_layers" : 2,
-    "dropout" : 0.25,
+    "num_layers" : 6,
+    "dropout" : 0.4,
     "bidirectional" : True,
 
     "beam_width_train" : 2,
     "beam_width_test" : 50,
-    "lr" : 2e-3,
-    "epochs" : 30,
+    "lr" : 4e-3,
+    "epochs" : 100,
     "weight_decay" : 1e-5,
-    "step_size" : 10,
+    "step_size" : 7,
     "scheduler_gamma" : 0.8,
     } 
 
