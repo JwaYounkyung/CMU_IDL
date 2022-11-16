@@ -14,7 +14,7 @@ import wandb
 import argparse
 
 from models import basic
-from backbones import get_model
+from models.backbones import get_model
 import timm
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -29,19 +29,20 @@ print("Device: ", device)
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument(
-        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/senet50'))
+        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'data/r50'))
     parser.add_argument('--num_classes', default=7000)
     # parser.add_argument('--batch_size', type=int, default=1024)
     # parser.add_argument('--lr', type=float, default=0.01)
     # parser.add_argument('--epoch', type=int, default=90)
     parser.add_argument('--num_workers', type=int, default=32)
     parser.add_argument('--gpu_ids', nargs="+", default=[0, 1, 2, 3])
-    parser.add_argument('--dropout', default=0.1)
+    parser.add_argument('--dropout', default=0.15)
     parser.add_argument('--scheduler_gamma', default=0.5)
     parser.add_argument('--weight_decay', default=1e-5)
     parser.add_argument('--step_size', default=10)
-    parser.add_argument('--checkpoint', default='checkpoint2.pth')
-    parser.add_argument('--wandb_name', default='senet50')
+    parser.add_argument('--checkpoint', default='checkpoint1.pth')
+    parser.add_argument('--wandb_name', default='r50')
+    parser.add_argument('--wandb_key', type=str)
 
     args = parser.parse_args(argv)
     return args
@@ -49,8 +50,8 @@ def parse_args(argv=None):
 args = parse_args()
 
 config = {
-    'batch_size': 64*len(args.gpu_ids), # Increase this if your GPU can handle it
-    'lr': 0.1,
+    'batch_size': 32*len(args.gpu_ids), # Increase this if your GPU can handle it
+    'lr': 0.15,
     'epochs': 100, # 10 epochs is recommended ONLY for the early submission - you will have to train for much longer typically.
     # Include other parameters as needed.
 }
@@ -61,7 +62,7 @@ TRAIN_DIR = os.path.join(DATA_DIR, "classification/train")
 VAL_DIR = os.path.join(DATA_DIR, "classification/dev")
 TEST_DIR = os.path.join(DATA_DIR, "classification/test")
 
-# Data mean and std for normalization
+# # Data mean and std for normalization
 
 # data_transformer = torchvision.transforms.Compose([
 #                     torchvision.transforms.ToTensor()])
@@ -156,14 +157,14 @@ print("Test batches: ", test_loader.__len__())
             
 # %% model
 # model = basic.Network()
-# model = get_model("r50", dropout=args.dropout, fp16=True, num_features=args.num_classes)
-model = timm.create_model(
-        'seresnet50',
-        pretrained=False,
-        in_chans=3,
-        num_classes=args.num_classes,
-        drop_rate=args.dropout,
-    )
+model = get_model("r50", dropout=args.dropout, fp16=True, num_features=args.num_classes)
+# model = timm.create_model(
+#         'seresnet50',
+#         pretrained=False,
+#         in_chans=3,
+#         num_classes=args.num_classes,
+#         drop_rate=args.dropout,
+#     )
 
 # DataParallel
 model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
@@ -177,7 +178,6 @@ optimizer = torch.optim.SGD(model.parameters(), lr=config['lr'], momentum=0.9, w
 # TODO: Implement a scheduler (Optional but Highly Recommended)
 # You can try ReduceLRonPlateau, StepLR, MultistepLR, CosineAnnealing, etc.
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.scheduler_gamma)
-# scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config['batch_size']*config['epochs'])
 scaler = torch.cuda.amp.GradScaler() # Good news. We have FP16 (Mixed precision training) implemented for you
 # It is useful only in the case of compatible GPUs such as T4/V100
 
@@ -267,7 +267,7 @@ def validate(model, dataloader, criterion):
 gc.collect() # These commands help you when you face CUDA OOM error
 torch.cuda.empty_cache()
 #'''
-wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") #API Key is in your wandb account, under settings (wandb.ai/settings)
+wandb.login(key=args.wandb_key) #API Key is in your wandb account, under settings (wandb.ai/settings)
 
 # Create your wandb run
 run = wandb.init(
