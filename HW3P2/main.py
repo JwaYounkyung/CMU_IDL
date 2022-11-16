@@ -67,19 +67,20 @@ config = {
     "architecture" : "lstm",
     "embedding_size1": 64,
     "embedding_size2": 128,
-    "embedding_size3": 256,
-    "hidden_size" : 256,
+    "embedding_size3": 0,
+    "hidden_size" : 128, #*2
     "num_layers" : 5,
     "dropout" : 0.3,
     "bidirectional" : True,
+    "fc1" : True,
 
     "beam_width_train" : 2,
     "beam_width_test" : 50,
     "lr" : 4e-3,
     "epochs" : 100,
     "weight_decay" : 1e-5,
-    "step_size" : 7,
-    "scheduler_gamma" : 0.8,
+    "step_size" : 2,
+    "scheduler_gamma" : 0.9,
     } 
 
 
@@ -168,8 +169,8 @@ criterion = torch.nn.CTCLoss(blank=0)
 optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-08, 
                               weight_decay=config["weight_decay"]) 
 # 수정
-# ReduceLRonPlateau
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config['step_size'], gamma=config['scheduler_gamma']) #TODO
+# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config['step_size'], gamma=config['scheduler_gamma']) #TODO
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=config['step_size'], factor=config['scheduler_gamma'])
 # Mixed Precision, if you need it
 scaler = torch.cuda.amp.GradScaler()
 
@@ -338,7 +339,7 @@ for epoch in range(config["epochs"]):
         wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
                 "validation_Dist":val_dist, "learning_Rate": curr_lr})
     
-    scheduler.step()
+    scheduler.step(val_loss)
     # 수정
     # HINT: Calculating levenshtein distance takes a long time. Do you need to do it every epoch?
     # Does the training step even need it? 
