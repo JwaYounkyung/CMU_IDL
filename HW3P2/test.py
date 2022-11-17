@@ -67,18 +67,20 @@ config = {
     "architecture" : "lstm",
     "embedding_size1": 64,
     "embedding_size2": 128,
-    "hidden_size" : 128,
-    "num_layers" : 6,
-    "dropout" : 0.4,
+    "embedding_size3": 0,
+    "hidden_size" : 128, #*2
+    "num_layers" : 5,
+    "dropout" : 0.3,
     "bidirectional" : True,
+    "fc1" : True,
 
     "beam_width_train" : 2,
     "beam_width_test" : 50,
     "lr" : 4e-3,
     "epochs" : 100,
     "weight_decay" : 1e-5,
-    "step_size" : 7,
-    "scheduler_gamma" : 0.8,
+    "step_size" : 2,
+    "scheduler_gamma" : 0.9,
     } 
 
 
@@ -133,7 +135,7 @@ input_size = x_test.shape[2]
 # %% Model Config
 OUT_SIZE = len(LABELS)
 
-model = Network(input_size, config["embedding_size1"], config["embedding_size2"], config["hidden_size"], config["num_layers"], 
+model = Network(input_size, config["embedding_size1"], config["embedding_size2"], config["embedding_size3"], config["hidden_size"], config["num_layers"], 
                 config["dropout"], config["bidirectional"], OUT_SIZE)
 model.to(device)
 if distributed:
@@ -145,8 +147,8 @@ criterion = torch.nn.CTCLoss(blank=0)
 optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-08, 
                               weight_decay=config["weight_decay"]) 
 # 수정
-# ReduceLRonPlateau
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config['step_size'], gamma=config['scheduler_gamma']) #TODO
+# scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config['step_size'], gamma=config['scheduler_gamma']) #TODO
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=config['step_size'], factor=config['scheduler_gamma'])
 # Mixed Precision, if you need it
 scaler = torch.cuda.amp.GradScaler()
 
