@@ -38,25 +38,36 @@ Eventually, the directory structure should look like this:
 - unpack [4, 1520, 256]
 - fc [4, 1520, 43]
 
-### Model 2 embedding 2
+### Model 2 embedding 2 fc 2
 - input [4, 1520, 15], lx [1117, 1498, 1520, 1075]
-- embedding1 [4, 1520, 64]
-- embedding2 [4, 1520, 128]
+- embedding1 [4, 64, 1520]
+- embedding2 [4, 128, 1520]
 - packed [5210, 128]
 - packed lstm [5210, 256]
 - unpack [4, 1520, 256]
-- fc [4, 1520, 43]
-
-### Model 3 embedding 3 fc 2
-- input [4, 1520, 15], lx [1117, 1498, 1520, 1075]
-- embedding1 [4, 1520, 64]
-- embedding2 [4, 1520, 128]
-- embedding2 [4, 1520, 256]
-- packed [5210, 256]
-- packed lstm [5210, 512]
-- unpack [4, 1520, 512]
 - fc1 [4, 1520, 128]
 - fc2 [4, 1520, 43]
+
+### Model 3 stride 2
+- input [4, 1630, 15], lx [342, 700, 1630, 1508]
+- embedding1 [4, 128, 815]
+- embedding2 [4, 256, 408]
+- lx [342, 408, 408, 408]
+- packed [1566, 256]
+- packed lstm [1566, 256]
+- unpack [4, 408, 256]
+- fc1 [4, 408, 128]
+- fc2 [4, 408, 43]
+
+### 정리 
+recomand
+1. conv 2개에 stride 2 쓰고 -> clamp로 길이 /2 
+2. kernel 5으로 바꾸고 
+3. embedding 64, 128 -> 128, 256 
+4. glue 추천 
+5. residual 별로임 
+6. distance validation에 적용하면 그렇게 시간이 안걸린다. 하지만 안할듯 # 
+
 
 ### Decoder 
 - outputs [B, T, 43]

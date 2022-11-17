@@ -10,23 +10,17 @@ class Network(nn.Module):
 
         # 수정
         self.embedding1 = nn.Sequential(
-            nn.Conv1d(input_size, embedding_size1, 3, 1, padding=1), # in_channel, out_channel, kernel_size, stride
+            nn.Conv1d(input_size, embedding_size1, 5, 2, padding=2), # in_channel, out_channel, kernel_size, stride
             nn.BatchNorm1d(num_features=embedding_size1),
-            nn.PReLU(num_parameters=embedding_size1),
+            nn.GELU(), # glue
             nn.Dropout(dropout)
         )
         self.embedding2 = nn.Sequential(
-            nn.Conv1d(embedding_size1, embedding_size2, 3, 1, padding=1), # in_channel, out_channel, kernel_size, stride
+            nn.Conv1d(embedding_size1, embedding_size2, 5, 2, padding=2), # in_channel, out_channel, kernel_size, stride
             nn.BatchNorm1d(num_features=embedding_size2),
-            nn.PReLU(num_parameters=embedding_size2),
+            nn.GELU(),
             nn.Dropout(dropout)
         )
-        # self.embedding3 = nn.Sequential(
-        #     nn.Conv1d(embedding_size2, embedding_size3, 3, 1, padding=1), # in_channel, out_channel, kernel_size, stride
-        #     nn.BatchNorm1d(num_features=embedding_size3),
-        #     nn.PReLU(num_parameters=embedding_size3),
-        #     nn.Dropout(dropout)
-        # )
 
         # TODO 
         self.lstm = nn.LSTM(embedding_size2, hidden_size, num_layers=num_layers, batch_first=True,
@@ -36,7 +30,7 @@ class Network(nn.Module):
         )
         self.fc1_norm = nn.Sequential(
             nn.BatchNorm1d(num_features=128),
-            nn.PReLU(num_parameters=128),
+            nn.GELU(),
             nn.Dropout(dropout)
         )
         self.classification = nn.Sequential(
@@ -50,7 +44,7 @@ class Network(nn.Module):
         x = x.permute(0, 2, 1)
         x = self.embedding1(x)
         x = self.embedding2(x)
-        #x = self.embedding3(x)
+        lx = torch.clamp(lx, max=x.shape[2])
         x = x.permute(0, 2, 1)
 
         packed = pack_padded_sequence(x, lx.cpu(), batch_first=True, enforce_sorted=False)

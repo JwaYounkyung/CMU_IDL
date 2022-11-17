@@ -52,7 +52,7 @@ if distributed and device != 'cpu':
     dist.init_process_group(backend='nccl', init_method='env://')
     print('local_rank', local_rank)
 
-if device != 'cpu':
+if device != 'cpu' and distributed:
     batch_size *= len(gpu_ids)
 
 args = {
@@ -65,8 +65,8 @@ config = {
     "num_workers": 24, # 수정 mac 0
     
     "architecture" : "lstm",
-    "embedding_size1": 64,
-    "embedding_size2": 128,
+    "embedding_size1": 128,
+    "embedding_size2": 256,
     "embedding_size3": 0,
     "hidden_size" : 128, #*2
     "num_layers" : 5,
@@ -175,18 +175,6 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patienc
 scaler = torch.cuda.amp.GradScaler()
 
 # %% 
-decoder = CTCBeamDecoder(
-    LABELS,
-    model_path=None,
-    alpha=0,
-    beta=0,
-    cutoff_top_n=40,
-    cutoff_prob=1.0,
-    beam_width=2,#config["beam_width_test"],
-    num_processes=4,
-    blank_id=0,
-    log_probs_input=True
-)#TODO 
 
 # Sanity Check Levenshtein Distance: 450 < d < 800
 with torch.no_grad():
@@ -217,8 +205,6 @@ with torch.no_grad():
 
       loss = criterion(x, y, lx, ly)
       print(f"loss: {loss}")
-
-
 
       break # one iteration is enough
 
@@ -335,11 +321,6 @@ for epoch in range(config["epochs"]):
     val_loss, val_dist = evaluate(model, val_loader, criterion, epoch)
     print("Val Loss {:.04f}\t Val Dist {:.04f}".format(val_loss, val_dist))
 
-    if local_rank == 1:
-        wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
-                "validation_Dist":val_dist, "learning_Rate": curr_lr})
-    
-    scheduler.step(val_loss)
     # 수정
     # HINT: Calculating levenshtein distance takes a long time. Do you need to do it every epoch?
     # Does the training step even need it? 
@@ -357,6 +338,13 @@ for epoch in range(config["epochs"]):
       if local_rank == 1:
         wandb.save('checkpoint.pth')
 
+    if local_rank == 1:
+        wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
+                   "validation_Dist":val_dist, "learning_Rate": curr_lr,
+                   "best_val_loss": best_val_loss})
+    
+    scheduler.step(val_loss)
+    
 if local_rank == 1:
     run.finish()
 
