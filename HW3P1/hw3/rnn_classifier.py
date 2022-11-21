@@ -15,12 +15,12 @@ class RNNPhonemeClassifier(object):
         self.num_layers = num_layers
 
         # TODO: Understand then uncomment this code :)
-        # self.rnn = [
-        #     RNNCell(input_size, hidden_size) if i == 0 
-        #         else RNNCell(hidden_size, hidden_size)
-        #             for i in range(num_layers)
-        # ]
-        # self.output_layer = Linear(hidden_size, output_size)
+        self.rnn = [
+            RNNCell(input_size, hidden_size) if i == 0 
+                else RNNCell(hidden_size, hidden_size)
+                    for i in range(num_layers)
+        ]
+        self.output_layer = Linear(hidden_size, output_size)
 
         # store hidden states at each time step, [(seq_len+1) * (num_layers, batch_size, hidden_size)]
         self.hiddens = []
@@ -89,30 +89,38 @@ class RNNPhonemeClassifier(object):
         #   Similar to above, append a copy of the current hidden array to the hiddens list
         
         # TODO
+        for i in range(seq_len):
+            for j in range(self.num_layers):
+                if j == 0:
+                    hidden[j] = self.rnn[j](x[:,i,:], hidden[j])
+                else:
+                    hidden[j] = self.rnn[j](hidden[j-1], hidden[j])
+            self.hiddens.append(hidden.copy())
 
         # Get the outputs from the last time step using the linear layer and return it
         # <--------------------------
-        
-        # return logits 
-        raise NotImplementedError
+        logits = self.output_layer(hidden[-1])       
+
+        return logits 
 
     def backward(self, delta):
         """RNN Back Propagation Through Time (BPTT).
 
         Parameters
         ----------
-        delta: (batch_size, hidden_size)
+        delta: (batch_size, hidden_size) (5, 138)
 
         gradient: dY(seq_len-1)
                 gradient w.r.t. the last time step output.
 
         Returns
         -------
-        dh_0: (num_layers, batch_size, hidden_size)
+        dh_0: (num_layers, batch_size, hidden_size) (2, 5, 138)
 
         gradient w.r.t. the initial hidden states
 
         """
+        # delta (5, 138)
         # Initilizations
         batch_size, seq_len = self.x.shape[0], self.x.shape[1]
         dh = np.zeros((self.num_layers, batch_size, self.hidden_size), dtype=float)
@@ -143,6 +151,14 @@ class RNNPhonemeClassifier(object):
 
         """
         # TODO
-
-        # return dh / batch_size
-        raise NotImplementedError
+        for i in range(seq_len-1, -1, -1):
+            for j in range(self.num_layers-1, -1, -1):
+                if j == 0:
+                    h_prev_l = self.x[:,i,:]
+                else:
+                    h_prev_l = self.hiddens[i+1][j-1]
+                dx, dh[j] = self.rnn[j].backward(dh[j], self.hiddens[i+1][j], h_prev_l, self.hiddens[i][j])
+                if j != 0:
+                    dh[j-1] += dx
+        
+        return dh / batch_size # (2, 5, 138)

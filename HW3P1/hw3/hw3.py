@@ -15,11 +15,11 @@ class CharacterPredictor(object):
 
     """
 
-    def __init__(self, input_dim, hidden_dim, num_classes):
+    def __init__(self, input_dim, hidden_dim, num_classes): # 7, 4, 3
         super(CharacterPredictor, self).__init__()
         """The network consists of a GRU Cell and a linear layer."""
-        self.rnn = None # TODO
-        self.projection = None # TODO
+        self.rnn = GRUCell(input_dim, hidden_dim) # TODO
+        self.projection = Linear(hidden_dim, num_classes) # TODO
         self.projection.W = np.random.rand(num_classes, hidden_dim)
 
     def init_rnn_weights(
@@ -40,28 +40,28 @@ class CharacterPredictor(object):
 
         Input
         -----
-        x: (feature_dim)
+        x: (feature_dim) (7)
             observation at current time-step.
 
-        h: (hidden_dim)
+        h: (hidden_dim) (4)
             hidden-state at previous time-step.
         
         Returns
         -------
-        logits: (num_classes)
+        logits: (num_classes) (3)
             hidden state at current time-step.
 
-        hnext: (hidden_dim)
+        hnext: (hidden_dim) (4)
             hidden state at current time-step.
 
         """
-        hnext = None # TODO
+        h_prev_t = h
+        hnext = self.rnn(x, h_prev_t) # TODO
         # self.projection expects input in the form of batch_size * input_dimension
         # Therefore, reshape the input of self.projection as (1,-1)
-        logits = None # TODO
-        # logits = logits.reshape(-1,) # uncomment once code implemented
-        # return logits, hnext
-        raise NotImplementedError
+        logits = self.projection(np.reshape(hnext, (1, -1))) # TODO
+        logits = logits.reshape(-1,) # uncomment once code implemented
+        return logits, hnext
 
 
 def inference(net, inputs):
@@ -75,15 +75,26 @@ def inference(net, inputs):
     net:
         An instance of CharacterPredictor.
 
-    inputs: (seq_len, feature_dim)
+    inputs: (seq_len, feature_dim) (10, 7)
             a sequence of inputs of dimensions.
 
     Returns
     -------
-    logits: (seq_len, num_classes)
+    logits: (seq_len, num_classes) (10, 3)
             one per time step of input..
 
     """
     
     # This code should not take more than 10 lines. 
-    raise NotImplementedError
+    # student_net, inputs
+    
+    logits = []
+    for i in range(inputs.shape[0]):
+        if i == 0:
+            logit, hnext = net(inputs[i], np.zeros(net.rnn.h))
+        else:
+            logit, hnext = net(inputs[i], hnext)
+        logits.append(logit)
+    logits = np.array(logits)
+
+    return logits

@@ -25,96 +25,96 @@ print("Autograder - v1.1")
 
 
 test_list = {
-    'mcq' : [
-        {'title': 'Section 1a - Multiple Choice Questions',
-        'autolab': 'MCQ1',
-        'test': mcq_test.test_mcq_1,
-        'score': 1.25
-        },
-        {'title': 'Section 1b - Multiple Choice Questions',
-        'autolab': 'MCQ2',
-        'test': mcq_test.test_mcq_2,
-        'score': 1.25
-        },
-        {'title': 'Section 1c - Multiple Choice Questions',
-        'autolab': 'MCQ3',
-        'test': mcq_test.test_mcq_3,
-        'score': 1.25
-        },
-        {'title': 'Section 1d - Multiple Choice Questions',
-        'autolab': 'MCQ4',
-        'test': mcq_test.test_mcq_4,
-        'score': 1.25
-        }
-    ],
-    'rnn': [
-        {'title': 'Section 2.1 - RNN Forward',
-        'autolab': 'RNN_Forward',
-        'test': rnn_test.test_rnncell_forward,
-        'score': 5
-        },
-        {'title': 'Section 2.2 - RNN Backward',
-        'autolab': 'RNN_Backward',
-        'test': rnn_test.test_rnncell_backward,
-        'score': 5
-        },
-        {'title': 'Section 2.3 - RNN Classifier',
-        'autolab': 'RNN_Classifier',
-        'test': rnn_test.test_rnn_classifier,
-        'score': 10
-        }
-    ],
-    'gru': [
-        {'title': 'Section 3.1 - GRU Forward',
-        'autolab': 'GRU_Forward',
-        'test': gru_test.test_gru_forward,
-        'score': 5
-        },
-        {'title': 'Section 3.2 - GRU Backward',
-        'autolab': 'GRU_Backward',
-        'test': gru_test.test_gru_backward,
-        'score': 15
-        },
-        {'title': 'Section 3.3 - GRU Inference',
-        'autolab': 'GRU_Inference',
-        'test': gru_test.test_gru_inference,
-        'score': 10
-        }
-    ],
+    # 'mcq' : [
+    #     {'title': 'Section 1a - Multiple Choice Questions',
+    #     'autolab': 'MCQ1',
+    #     'test': mcq_test.test_mcq_1,
+    #     'score': 1.25
+    #     },
+    #     {'title': 'Section 1b - Multiple Choice Questions',
+    #     'autolab': 'MCQ2',
+    #     'test': mcq_test.test_mcq_2,
+    #     'score': 1.25
+    #     },
+    #     {'title': 'Section 1c - Multiple Choice Questions',
+    #     'autolab': 'MCQ3',
+    #     'test': mcq_test.test_mcq_3,
+    #     'score': 1.25
+    #     },
+    #     {'title': 'Section 1d - Multiple Choice Questions',
+    #     'autolab': 'MCQ4',
+    #     'test': mcq_test.test_mcq_4,
+    #     'score': 1.25
+    #     }
+    # ],
+    # 'rnn': [
+    #     {'title': 'Section 2.1 - RNN Forward',
+    #     'autolab': 'RNN_Forward',
+    #     'test': rnn_test.test_rnncell_forward,
+    #     'score': 5
+    #     },
+    #     {'title': 'Section 2.2 - RNN Backward',
+    #     'autolab': 'RNN_Backward',
+    #     'test': rnn_test.test_rnncell_backward,
+    #     'score': 5
+    #     },
+    #     {'title': 'Section 2.3 - RNN Classifier',
+    #     'autolab': 'RNN_Classifier',
+    #     'test': rnn_test.test_rnn_classifier,
+    #     'score': 10
+    #     }
+    # ],
+    # 'gru': [
+        # {'title': 'Section 3.1 - GRU Forward',
+        # 'autolab': 'GRU_Forward',
+        # 'test': gru_test.test_gru_forward,
+        # 'score': 5
+        # },
+        # {'title': 'Section 3.2 - GRU Backward',
+        # 'autolab': 'GRU_Backward',
+        # 'test': gru_test.test_gru_backward,
+        # 'score': 15
+        # },
+    #     {'title': 'Section 3.3 - GRU Inference',
+    #     'autolab': 'GRU_Inference',
+    #     'test': gru_test.test_gru_inference,
+    #     'score': 10
+    #     }
+    # ],
     'ctc': [
         {'title': 'Section 4 - Extend Sequence with Blank',
         'autolab': 'Ext_Seq',
         'test': ctc_test.test_ctc_extend_seq,
         'score': 5
         },
-        {'title': 'Section 4 - Posterior Probability',
-        'autolab': 'Post_Prob',
-        'test': ctc_test.test_ctc_posterior_prob,
-        'score': 5
-        },
-        {'title': 'Section 4.1 - CTC Forward',
-        'autolab': 'CTC_Forward',
-        'test': ctc_test.test_ctc_forward,
-        'score': 10
-        },
-        {'title': 'Section 4.2 - CTC Backward',
-        'autolab': 'CTC_Backward',
-        'test': ctc_test.test_ctc_backward,
-        'score': 5
-        }
+    #     {'title': 'Section 4 - Posterior Probability',
+    #     'autolab': 'Post_Prob',
+    #     'test': ctc_test.test_ctc_posterior_prob,
+    #     'score': 5
+    #     },
+    #     {'title': 'Section 4.1 - CTC Forward',
+    #     'autolab': 'CTC_Forward',
+    #     'test': ctc_test.test_ctc_forward,
+    #     'score': 10
+    #     },
+    #     {'title': 'Section 4.2 - CTC Backward',
+    #     'autolab': 'CTC_Backward',
+    #     'test': ctc_test.test_ctc_backward,
+    #     'score': 5
+    #     }
     ],
-    'search': [
-        {'title': 'Section 5.1 - Greedy Search',
-        'autolab': 'Greedy',
-        'test': search_test.test_greedy_search,
-        'score': 5
-        },
-        {'title': 'Section 5.2 - Beam Search',
-        'autolab': 'Beam',
-        'test': search_test.test_beam_search,
-        'score': 15
-        }
-    ]
+    # 'search': [
+    #     {'title': 'Section 5.1 - Greedy Search',
+    #     'autolab': 'Greedy',
+    #     'test': search_test.test_greedy_search,
+    #     'score': 5
+    #     },
+    #     {'title': 'Section 5.2 - Beam Search',
+    #     'autolab': 'Beam',
+    #     'test': search_test.test_beam_search,
+    #     'score': 15
+    #     }
+    # ]
 }
 
 

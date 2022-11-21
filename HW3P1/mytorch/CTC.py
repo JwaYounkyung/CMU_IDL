@@ -40,7 +40,7 @@ class CTC(object):
 		"""
 
 		extended_symbols = [self.BLANK]
-		for symbol in target:
+		for symbol in target: # array([1, 4])
 			extended_symbols.append(symbol)
 			extended_symbols.append(self.BLANK)
 
@@ -51,11 +51,12 @@ class CTC(object):
 		# <---------------------------------------------
 
 		extended_symbols = np.array(extended_symbols).reshape((N,))
-		skip_connect = np.array(skip_connect).reshape((N,))
-
-		# return extended_symbols, skip_connect
-		raise NotImplementedError
-
+		skip_connect = np.zeros(N, dtype=np.int32)
+		for i in range(3, N, 2):
+			if extended_symbols[i] != extended_symbols[i-2]:
+				skip_connect[i] = 1
+		# skip_connect = np.array(skip_connect).reshape((N,))
+		return extended_symbols, skip_connect
 
 	def get_forward_probs(self, logits, extended_symbols, skip_connect):
 		"""Compute forward probabilities.
