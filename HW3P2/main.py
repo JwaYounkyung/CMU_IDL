@@ -61,14 +61,14 @@ args = {
 }
     
 config = {
-    "batch_size": batch_size, # 수정
-    "num_workers": 24, # 수정 mac 0
+    "batch_size": batch_size,
+    "num_workers": 24, # mac 0
     
     "architecture" : "lstm",
     "embedding_size1": 128,
     "embedding_size2": 256,
     "embedding_size3": 0,
-    "hidden_size" : 128, #*2
+    "hidden_size" : 128,
     "num_layers" : 5,
     "dropout" : 0.3,
     "bidirectional" : True,
@@ -107,7 +107,6 @@ LABELS = ARPAbet
 
 # %% Hyperparameters
 
-# 수정 
 transforms = [] # Time Masking and Frequency Masking are 2 types of transformation, you may choose to apply
 # You may pass this as a parameter to the dataset class above
 
@@ -115,8 +114,6 @@ root = 'data/'
 gc.collect() 
 
 # %% Data Load
-# 수정 
-# train-clean-360도 같이 써야함
 train_data = AudioDataset(root, PHONEMES, ["train-clean-360", "train-clean-100"], transforms=None) #TODO
 val_data = AudioDataset(root, PHONEMES, ["dev-clean"], transforms=None) #TODO
 test_data = AudioDatasetTest(root, PHONEMES, "test-clean", transforms=None) #TODO
@@ -168,7 +165,7 @@ if distributed:
 criterion = torch.nn.CTCLoss(blank=0) 
 optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"], betas=(0.9, 0.999), eps=1e-08, 
                               weight_decay=config["weight_decay"]) 
-# 수정
+
 # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=config['step_size'], gamma=config['scheduler_gamma']) #TODO
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=config['step_size'], factor=config['scheduler_gamma'])
 # Mixed Precision, if you need it
@@ -287,7 +284,7 @@ def evaluate(model, val_loader, criterion, epoch):
 
 # %% wandb 
 def wandb_init():
-    wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9")
+    wandb.login(key="") # enter your wandb key here
     run = wandb.init(
         name = "lstm", ## Wandb creates random run names if you skip this field
         reinit = True, ### Allows reinitalizing runs when you re-run this cell
@@ -321,7 +318,7 @@ for epoch in range(config["epochs"]):
     val_loss, val_dist = evaluate(model, val_loader, criterion, epoch)
     print("Val Loss {:.04f}\t Val Dist {:.04f}".format(val_loss, val_dist))
 
-    # 수정
+
     # HINT: Calculating levenshtein distance takes a long time. Do you need to do it every epoch?
     # Does the training step even need it? 
     if val_loss < best_val_loss:
