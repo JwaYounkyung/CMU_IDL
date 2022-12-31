@@ -3,18 +3,21 @@ import os
 import numpy as np
 from torch.nn.utils.rnn import pad_sequence
 
+EOS_TOKEN = 29
+
 # Dataset class for the Toy dataset
 class ToyDataset(torch.utils.data.Dataset):
 
-    def __init__(self, partition):
+    def __init__(self, partition, X, Y):
 
+    
         if partition == "train":
-            self.mfccs = X_train[:, :, :15]
-            self.transcripts = Y_train
+            self.mfccs = X[:, :, :15]
+            self.transcripts = Y
 
         elif partition == "valid":
-            self.mfccs = X_valid[:, :, :15]
-            self.transcripts = Y_valid
+            self.mfccs = X[:, :, :15]
+            self.transcripts = Y
 
         assert len(self.mfccs) == len(self.transcripts)
 
@@ -67,8 +70,8 @@ class AudioDataset(torch.utils.data.Dataset):
             self.transcript_files.extend(transcripts)
 
         # 수정
-        self.mfcc_files = self.mfcc_files[:100]
-        self.transcript_files = self.transcript_files[:100]
+        # self.mfcc_files = self.mfcc_files[:10]
+        # self.transcript_files = self.transcript_files[:10]
         assert len(self.mfcc_files) == len(self.transcript_files) 
 
         self.PHONEMES = PHONEMES
@@ -141,10 +144,10 @@ class AudioDataset(torch.utils.data.Dataset):
         # batch of output phonemes
         batch_transcript = [batch[i][1] for i in range(len(batch))] # TODO
 
-        batch_mfcc_pad = pad_sequence(batch_mfcc, batch_first=True, padding_value=0.0) # TODO
+        batch_mfcc_pad = pad_sequence(batch_mfcc, batch_first=True, padding_value=EOS_TOKEN) # TODO
         lengths_mfcc = [batch_mfcc[i].shape[0] for i in range(len(batch))] # TODO 
 
-        batch_transcript_pad = pad_sequence(batch_transcript, batch_first=True, padding_value=0) # TODO
+        batch_transcript_pad = pad_sequence(batch_transcript, batch_first=True, padding_value=EOS_TOKEN) # TODO
         lengths_transcript = [batch_transcript[i].shape[0] for i in range(len(batch))] # TODO
 
         # 수정
@@ -171,7 +174,7 @@ class AudioDatasetTest(torch.utils.data.Dataset):
         self.mfcc_files = sorted(os.listdir(self.mfcc_dir)) #TODO
 
         # 수정
-        self.mfcc_files = self.mfcc_files[:100]
+        # self.mfcc_files = self.mfcc_files[:10]
 
         self.PHONEMES = PHONEMES
         self.length = len(self.mfcc_files)
@@ -205,7 +208,7 @@ class AudioDatasetTest(torch.utils.data.Dataset):
         TODO
         '''
         batch_mfcc = [batch[i] for i in range(len(batch))] # TODO
-        batch_mfcc_pad = pad_sequence(batch_mfcc, batch_first=True, padding_value=0.0) # TODO
+        batch_mfcc_pad = pad_sequence(batch_mfcc, batch_first=True, padding_value=EOS_TOKEN) # TODO
         lengths_mfcc = [batch_mfcc[i].shape[0] for i in range(len(batch))] # TODO 
         # 수정
         if self.transform:

@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 
 import Levenshtein
 
+SOS_TOKEN = 0
+EOS_TOKEN = 29
+
 def set_random_seed(seed_num=1):
 	random.seed(seed_num)
 	np.random.seed(seed_num)
@@ -51,7 +54,7 @@ def calc_edit_distance(predictions, y, ly, vocab, print_example=False):
         pred_string = ''.join(pred_sliced)
         
         dist        += Levenshtein.distance(pred_string, y_string)
-        # Comment the above abd uncomment below for toy dataset 
+        # Comment the above and uncomment below for toy dataset 
         # dist      += Levenshtein.distance(y_sliced, pred_sliced)
 
     if print_example: 
