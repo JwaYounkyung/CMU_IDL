@@ -32,7 +32,7 @@ def indices_to_chars(indices, vocab):
     for i in indices: # This loops through all the indices
         if vocab[int(i)] == SOS_TOKEN: # If SOS is encountered, dont add it to the final list
             continue
-        elif vocab[int(i)] == EOS_TOKEN: # If EOS is encountered, stop the decoding process
+        elif voca b[int(i)] == EOS_TOKEN: # If EOS is encountered, stop the decoding process
             break
         else:
             tokens.append(vocab[i])

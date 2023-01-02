@@ -9,7 +9,7 @@ import torchaudio
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 import gc
 from torchsummaryX import summary
 import wandb
@@ -23,10 +23,23 @@ from modules.utils import set_random_seed, plot_attention, calc_edit_distance, i
 from modules.dataset import ToyDataset, AudioDataset, AudioDatasetTest
 from models.LAS import Listener, Attention, LAS
 
+import argparse
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(__file__)
+    parser.add_argument('--distributed', type=bool, default=False)
+    parser.add_argument(
+        '--model_dir', default=os.path.join(os.path.dirname(__file__), 'weights/LAS'))
+    parser.add_argument('--exp_name', default='LAS')
+    parser.add_argument('--toy', default=False)
+    args = parser.parse_args(argv)
+    return args
+args = parse_args()
+
 set_random_seed(seed_num=1)
 
 # multi gpu
-distributed = False
+distributed = args.distributed
 local_rank, gpu_ids = 0, [0, 1, 2, 3, 4, 5, 6, 7]
 batch_size = 96
 
@@ -51,12 +64,7 @@ if distributed and device != 'cpu':
 if device != 'cpu' and distributed:
     batch_size *= len(gpu_ids)
 
-# Global args, config dict.
-args = {
-    'model_dir': os.path.join(os.path.dirname(__file__), 'HW4P2/weights/LAS'),
-    'exp_name': 'LAS',
-    'toy': False,
-}
+# Global config dict.
 config = {
     "batch_size"      : batch_size,
     "num_workers"     : 24, # mac 0
@@ -72,7 +80,7 @@ config = {
     "scheduler_gamma" : 0.9,
 }
 
-if args['toy']:
+if args.toy:
     # Load the toy dataset
     X_train = np.load("data/f0176_mfccs_train.npy") # (1600, 176, 26)
     X_valid = np.load("data/f0176_mfccs_dev.npy")   # (1600, 176, 26)
@@ -117,7 +125,7 @@ gc.collect()
 
 # Time Masking and Frequency Masking are 2 types of transformation, you may choose to apply
 transform = None #torchaudio.transforms.SlidingWindowCmn()
-if args['toy']:
+if args.toy:
     train_data = ToyDataset("train", X_train, Y_train)
     val_data = ToyDataset("valid", X_valid, Y_valid)
 else:
@@ -151,24 +159,24 @@ print("Test dataset samples = {}, batches = {}".format(test_data.__len__(), len(
 
 # The sanity check for shapes also are similar
 # sanity check
-for data in train_loader:
-    x, y, lx, ly = data
-    print(x.shape, y.shape, lx.shape, ly.shape)
-    # [batch_size, 1658, 15] [batch_size, 246] [batch_size] [batch_size]
-    break 
-for data in test_loader:
-    x_test, lx_test = data
-    print(x_test.shape, lx_test.shape)
-    # [batch_size, 1047, 15] [batch_size]
-    break 
-input_size = x.shape[2]
+# for data in train_loader:
+#     x, y, lx, ly = data
+#     print(x.shape, y.shape, lx.shape, ly.shape)
+#     # [batch_size, 1658, 15] [batch_size, 246] [batch_size] [batch_size]
+#     break 
+# for data in test_loader:
+#     x_test, lx_test = data
+#     print(x_test.shape, lx_test.shape)
+#     # [batch_size, 1047, 15] [batch_size]
+#     break 
+input_size = 15
 
 # Encoder Check
-encoder_hidden_size = 256
-encoder = Listener(input_size, encoder_hidden_size, 0)# TODO: Initialize Listener
-print(encoder)
-summary(encoder, x.to(DEVICE), lx)
-del encoder
+# encoder_hidden_size = 256
+# encoder = Listener(input_size, encoder_hidden_size, 0)# TODO: Initialize Listener
+# print(encoder)
+# # summary(encoder, x.to(DEVICE), lx)
+# del encoder
 
 
 # Baseline LAS has the following configuration:
@@ -194,12 +202,12 @@ model = LAS(
 model = model.to(DEVICE)
 if distributed:
     model = DDP(model, device_ids=[local_rank])
-print(model)
+# print(model)
 
-summary(model, 
-        x=x.to(DEVICE), 
-        x_lens=lx, 
-        y=y.to(DEVICE))
+# summary(model, 
+#         x=x.to(DEVICE), 
+#         x_lens=lx, 
+#         y=y.to(DEVICE))
 
 
 optimizer   = torch.optim.Adam(model.parameters(), lr=config['lr'], amsgrad=True, weight_decay=config['weight_decay'])
@@ -212,20 +220,19 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',
 def train(model, dataloader, criterion, optimizer, teacher_forcing_rate):
 
     model.train()
-    batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc='Train')
+    batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc='Train', ncols=5)
 
     running_loss        = 0.0
     running_perplexity  = 0.0
     
     for i, (x, y, lx, ly) in enumerate(dataloader):
-
         optimizer.zero_grad()
 
-        x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx, ly
+        x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx.to(DEVICE), ly.to(DEVICE)
 
         with torch.cuda.amp.autocast():
             predictions, attention_plot = model(x, lx, y=y, tf_rate=teacher_forcing_rate)
-            
+
             # Predictions are of Shape (batch_size, timesteps, vocab_size). 
             # Transcripts are of shape (batch_size, timesteps) Which means that you have batch_size amount of batches with timestep number of tokens.
             # So in total, you have batch_size*timesteps amount of characters.
@@ -243,33 +250,30 @@ def train(model, dataloader, criterion, optimizer, teacher_forcing_rate):
             mask = mask.view(-1)
             masked_loss = mask*loss # Product between the mask and the loss, divided by the mask's sum. Hint: You may want to reshape the mask too 
 
-            perplexity  = torch.exp(masked_loss) # Perplexity is defined the exponential of the loss
+            perplexity  = torch.exp(masked_loss.mean()) # Perplexity is defined the exponential of the loss
 
-            running_loss        += masked_loss.mean().item()
-            running_perplexity  += perplexity.mean().item()
-        
-        # Backward on the masked loss
-        scaler.scale(masked_loss.mean()).backward()
+        running_loss        += masked_loss.mean().item()
+        running_perplexity  += perplexity.item()
 
-        # Optional: Use torch.nn.utils.clip_grad_norm to clip gradients to prevent them from exploding, if necessary
-        # If using with mixed precision, unscale the Optimizer First before doing gradient clipping
-        
-        scaler.step(optimizer)
-        scaler.update()
-        
         batch_bar.set_postfix(
             loss="{:.04f}".format(running_loss/(i+1)),
             perplexity="{:.04f}".format(running_perplexity/(i+1)),
             lr="{:.04f}".format(float(optimizer.param_groups[0]['lr'])),
             tf_rate='{:.02f}'.format(teacher_forcing_rate))
+        # Backward on the masked loss
+        scaler.scale(masked_loss.mean()).backward()
+        # Optional: Use torch.nn.utils.clip_grad_norm to clip gradients to prevent them from exploding, if necessary
+        # If using with mixed precision, unscale the Optimizer First before doing gradient clipping
+        scaler.step(optimizer)
+        scaler.update()
         batch_bar.update()
 
         del x, y, lx, ly
-        torch.cuda.empty_cache()
-
+        #torch.cuda.empty_cache()
+    
+    batch_bar.close()
     running_loss /= len(dataloader)
     running_perplexity /= len(dataloader)
-    batch_bar.close()
 
     return running_loss, running_perplexity, attention_plot
 
@@ -278,13 +282,12 @@ def validate(model, dataloader):
 
     model.eval()
 
-    batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, position=0, leave=False, desc="Val")
+    batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, position=0, leave=False, desc="Val", ncols=5)
 
     running_lev_dist = 0.0
 
     for i, (x, y, lx, ly) in enumerate(dataloader):
-
-        x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx, ly
+        x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx.to(DEVICE), ly.to(DEVICE)
 
         with torch.no_grad():
             predictions, attentions = model(x, lx, y=None)
@@ -314,7 +317,7 @@ def validate(model, dataloader):
 # Initialize your Wandb Run Here
 # Optional: Save your model architecture in a txt file, and save the file to Wandb
 def wandb_init():
-    wandb.login(key="") # enter your wandb key here
+    wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") # enter your wandb key here
     run = wandb.init(
         name = "LAS", ## Wandb creates random run names if you skip this field
         reinit = True, ### Allows reinitalizing runs when you re-run this cell
@@ -325,7 +328,7 @@ def wandb_init():
     )
     return run
 
-if local_rank == 1:
+if local_rank == 0:
     run = wandb_init()
 
 
@@ -353,27 +356,27 @@ for epoch in range(0, config['epochs']):
     if val_lev_dist <= best_lev_dist:
         best_lev_dist = val_lev_dist
         # Save your model checkpoint here
-        os.makedirs(args['model_dir'], exist_ok=True)
-        path = os.path.join(args['model_dir'], 'checkpoint' + '.pth')
+        os.makedirs(args.model_dir, exist_ok=True)
+        path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
         print("Saving model")
         torch.save({'model_state_dict':model.state_dict(),
                     'val_loss': val_lev_dist, 
                     'epoch': epoch}, path)
-    if local_rank == 1:
+    if local_rank == 0:
         wandb.save('checkpoint.pth')
 
-    if local_rank == 1:
+    if local_rank == 0:
         wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
                    "validation_dist":val_lev_dist, "learning_rate": curr_lr,
                    "best_dist": best_lev_dist})
     
-    scheduler.step(val_lev_dist)
+    # scheduler.step(val_lev_dist)
 
-if local_rank == 1:
+if local_rank == 0:
     run.finish()
 
 # Optional: Load your best model Checkpoint here
-path = os.path.join(args['model_dir'], 'checkpoint' + '.pth')
+path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
 checkpoint = torch.load(path, map_location=device)
 model.load_state_dict(checkpoint['model_state_dict'])
 
@@ -391,7 +394,7 @@ def make_string(predictions, vocab):
 def predict(model, test_loader):
 
     model.eval()
-    batch_bar = tqdm(total=len(test_loader), dynamic_ncols=True, position=0, leave=False, desc='Test')
+    batch_bar = tqdm(total=len(test_loader), dynamic_ncols=True, position=0, leave=False, desc='Test', ncols=5)
     test_results = []
   
     for i, data in enumerate(test_loader):
@@ -414,8 +417,8 @@ predictions = predict(model, test_loader)
 # TODO: Create a file with all predictions 
 df = pd.read_csv('data/hw4p2/test-clean/transcript/random_submission.csv')
 df.label = predictions
-# df.rename(columns={"index": "id"})
+df.rename(columns={"index": "id"})
 
-df.to_csv('HW4P2/results/submission' + args['exp_name'] + '.csv', index = False)
+df.to_csv('HW4P2/results/submission' + args.exp_name + '.csv', index = False)
 # TODO: Submit to Kaggle
 #!kaggle competitions submit -c 11-785-f22-hw3p2 -f results/submission_early.csv

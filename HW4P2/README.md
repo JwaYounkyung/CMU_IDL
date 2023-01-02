@@ -38,7 +38,8 @@ Eventually, the directory structure should look like this:
 To train and test the model, use
 
 ```bash
-python main.py 
+python HW4P2/main.py 
+torchrun --nproc_per_node=8 HW4P2/main.py --distributed True
 ```
 By default, test results are stored under `results/`.
 

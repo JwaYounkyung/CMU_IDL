@@ -27,9 +27,6 @@ class pBLSTM(torch.nn.Module):
     
     def __init__(self, input_size, hidden_size, dropout):
         super(pBLSTM, self).__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-
         # TODO: Initialize a single layer bidirectional LSTM with the given input_size and hidden_size
         self.blstm = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True,
                             dropout=dropout, bidirectional=True)
@@ -38,7 +35,7 @@ class pBLSTM(torch.nn.Module):
 
         # TODO: Pad Packed Sequence
         if isinstance(x, PackedSequence):
-            x, x_lens = pad_packed_sequence(x, batch_first=True, total_length=max(x_lens))
+            x, x_lens = pad_packed_sequence(x, batch_first=True, total_length=max(x_lens.cpu()))
         
         # Call self.trunc_reshape() which downsamples the time steps of x and increases the feature dimensions as mentioned above
         # self.trunc_reshape will return 2 outputs. What are they? Think about what quantites are changing.
@@ -59,7 +56,7 @@ class pBLSTM(torch.nn.Module):
         # TODO: Reshape x. When reshaping x, you have to reduce number of timesteps by a downsampling factor while increasing number of features by the same factor
         x = x.reshape(x.shape[0], x.shape[1]//2, 2*x.shape[2])
         # TODO: Reduce lengths by the same downsampling factor
-        x_lens = x_lens//2
+        x_lens = torch.div(x_lens, 2, rounding_mode='floor')
 
         return x, x_lens
 
@@ -70,8 +67,6 @@ class Listener(torch.nn.Module):
     '''
     def __init__(self, input_size, encoder_hidden_size=256, dropout=0):
         super(Listener, self).__init__()
-
-        self.encoder_hidden_size = encoder_hidden_size
         # The first LSTM at the very bottom
         self.base_lstm = nn.LSTM(input_size, 256, batch_first=True, 
                                  dropout=dropout, bidirectional=True)#TODO: Fill this up
@@ -81,8 +76,7 @@ class Listener(torch.nn.Module):
             # Hint: You are downsampling timesteps by a factor of 2, 
             # upsampling features by a factor of 2 and the LSTM is bidirectional)
             # Optional: Dropout/Locked Dropout after each pBLSTM (Not needed for early submission)
-        self.pBLSTMs = nn.ModuleList([pBLSTM(1024, self.encoder_hidden_size, dropout) for i in range(3)])
-        self.pBLSTM = pBLSTM(1024, self.encoder_hidden_size, dropout)
+        self.pBLSTMs = nn.ModuleList([pBLSTM(1024, encoder_hidden_size, dropout) for i in range(3)])
          
     def forward(self, x, x_lens):
         # Where are x and x_lens coming from? The dataloader
@@ -96,7 +90,7 @@ class Listener(torch.nn.Module):
         for f in self.pBLSTMs:
             encoder_outputs, encoder_lens = f(encoder_outputs, encoder_lens)
         # TODO: Pad Packed Sequence
-        encoder_outputs, encoder_lens = pad_packed_sequence(encoder_outputs, batch_first=True, total_length=max(encoder_lens))
+        encoder_outputs, encoder_lens = pad_packed_sequence(encoder_outputs, batch_first=True, total_length=max(encoder_lens.cpu()))
 
         # Remember the number of output(s) each function returns
         return encoder_outputs, encoder_lens
@@ -116,15 +110,17 @@ class Attention(torch.nn.Module):
 
     '''
     
-    def __init__(self, encoder_hidden_size, decoder_output_size, projection_size):
+    def __init__(self, encoder_hidden_size, decoder_output_size, projection_size, device):
         super(Attention, self).__init__()
+        self.device = device
+        self.projection_size = projection_size
 
         self.key_projection     = nn.Linear(encoder_hidden_size*2, projection_size)# TODO: Define an nn.Linear layer which projects the encoder_hidden_state to keys
         self.value_projection   = nn.Linear(encoder_hidden_size*2, projection_size)# TODO: Define an nn.Linear layer which projects the encoder_hidden_state to value
         self.query_projection   = nn.Linear(decoder_output_size, projection_size)# TODO: Define an nn.Linear layer which projects the decoder_output_state to query
         # Optional : Define an nn.Linear layer which projects the context vector
 
-        self.softmax            = nn.Softmax(dim=-1)# TODO: Define a softmax layer. Think about the dimension which you need to apply 
+        self.softmax            = nn.Softmax(dim=1)# TODO: Define a softmax layer. Think about the dimension which you need to apply 
         # Tip: What is the shape of energy? And what are those?
 
     # As you know, in the attention mechanism, the key, value and mask are calculated only once.
@@ -142,7 +138,7 @@ class Attention(torch.nn.Module):
         # TODO: To remove the influence of padding in the raw_weights, we want to create a boolean mask of shape (batch_size, timesteps) 
         # The mask is False for all indicies before padding begins, True for all indices after.
         # TODO You want to use a comparison between encoder_max_seq_len and encoder_lens to create this mask. 
-        self.padding_mask     =  torch.ones([batch, encoder_max_seq_len])
+        self.padding_mask     =  torch.ones([batch, encoder_max_seq_len]).to(self.device)
 
         for i in range(encoder_lens.shape[0]):
             if encoder_lens[i] < encoder_max_seq_len:
@@ -161,10 +157,10 @@ class Attention(torch.nn.Module):
 
         raw_weights        = torch.bmm(self.query.unsqueeze(1), torch.transpose(self.key, 1, 2)).squeeze(dim=1)# TODO: Calculate raw_weights which is the product of query and key, and is of shape (batch_size, timesteps)
         raw_weights        = raw_weights / math.sqrt(self.query.shape[-1])# TODO: Divide raw_weights by the square root of the projection size   
-        masked_raw_weights = raw_weights.masked_fill_(self.padding_mask==0, -1e9)# TODO: Mask the raw_weights with self.padding_mask. 
+        masked_raw_weights = raw_weights.masked_fill_(self.padding_mask==0, -1e4)# TODO: Mask the raw_weights with self.padding_mask. 
         # Take a look at pytorch's masked_fill_ function (You want the fill value to be a big negative number for the softmax to make it close to 0)
 
-        attention_weights  = torch.softmax(masked_raw_weights, dim=1)# TODO: Calculate the attention weights, which is the softmax of raw_weights
+        attention_weights  = self.softmax(masked_raw_weights)# TODO: Calculate the attention weights, which is the softmax of raw_weights
         context            = torch.bmm(attention_weights.unsqueeze(1), self.value).squeeze(dim=1)# TODO: Calculate the context - it is a product between attention_weights and value
 
         # Hint: You might need to use squeeze/unsqueeze to make sure that your operations work with bmm
@@ -176,12 +172,10 @@ class Speller(torch.nn.Module):
 
     def __init__(self, embed_size, decoder_hidden_size, decoder_output_size, vocab_size, device, attention_module=None):
         super().__init__()
-
-        self.vocab_size         = vocab_size
         self.device             = device
 
         # TODO: Initialize the Embedding Layer (Use the nn.Embedding Layer from torch), make sure you set the correct padding_idx  
-        self.embedding          = nn.Embedding(num_embeddings=self.vocab_size, 
+        self.embedding          = nn.Embedding(num_embeddings=vocab_size, 
                                                embedding_dim=embed_size, # embedding vector dimension(임의로 정할 수 있음 128등)
                                                padding_idx=EOS_TOKEN) # <pad> index
 
@@ -190,7 +184,7 @@ class Speller(torch.nn.Module):
                                 # Create Two LSTM Cells as per LAS Architecture
                                 # What should the input_size of the first LSTM Cell? 
                                 # Hint: It takes in a combination of the character embedding and context from attention
-                                nn.LSTMCell(embed_size+decoder_output_size, decoder_hidden_size),
+                                nn.LSTMCell(embed_size+attention_module.projection_size, decoder_hidden_size),
                                 nn.LSTMCell(decoder_hidden_size, decoder_output_size)
                                 )
     
@@ -198,7 +192,7 @@ class Speller(torch.nn.Module):
                                 # Think why we need this in terms of the query
 
         # TODO: Initialize the classification layer to generate your probability distribution over all characters
-        self.char_prob          = nn.Linear(decoder_output_size*2, self.vocab_size) 
+        self.char_prob          = nn.Linear(decoder_output_size*2, vocab_size) 
 
         self.char_prob.weight   = self.embedding.weight # Weight tying
 
@@ -232,7 +226,7 @@ class Speller(torch.nn.Module):
         hidden_states   = [None]*len(self.lstm_cells) 
 
         attention_plot          = []
-        attention_weights       = torch.zeros(batch_size, encoder_max_seq_len) # Attention Weights are zero if not using Attend Module
+        attention_weights       = torch.zeros(batch_size, encoder_max_seq_len).to(self.device) # Attention Weights are zero if not using Attend Module
 
         # Set Attention Key, Value, Padding Mask just once
         if self.attention != None:
@@ -304,7 +298,7 @@ class LAS(torch.nn.Module):
         super(LAS, self).__init__()
 
         self.encoder        = Listener(input_size, encoder_hidden_size, 0) # TODO: Initialize Encoder
-        attention_module    = Attention(encoder_hidden_size, decoder_output_size, projection_size)# TODO: Initialize Attention
+        attention_module    = Attention(encoder_hidden_size, decoder_output_size, projection_size, device)# TODO: Initialize Attention
         self.decoder        = Speller(embed_size, decoder_hidden_size, decoder_output_size, vocab_size, device, attention_module)# TODO: Initialize Decoder, make sure you pass the attention module 
 
     def forward(self, x, x_lens, y=None, tf_rate=1):
