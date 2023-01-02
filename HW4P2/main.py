@@ -79,7 +79,7 @@ config = {
     "epochs"          : 70,
     "lr"              : 1e-3,
     "weight_decay"    : 5e-6,
-    "step_size"       : 5,
+    "step_size"       : 3,
     "scheduler_gamma" : 0.5,
 }
 
@@ -162,11 +162,11 @@ print("Test dataset samples = {}, batches = {}".format(test_data.__len__(), len(
 
 # The sanity check for shapes also are similar
 # sanity check
-# for data in train_loader:
-#     x, y, lx, ly = data
-#     print(x.shape, y.shape, lx.shape, ly.shape)
-#     # [batch_size, 1658, 15] [batch_size, 246] [batch_size] [batch_size]
-#     break 
+for data in train_loader:
+    x, y, lx, ly = data
+    # print(x.shape, y.shape, lx.shape, ly.shape)
+    # [batch_size, 1658, 15] [batch_size, 246] [batch_size] [batch_size]
+    break 
 # for data in test_loader:
 #     x_test, lx_test = data
 #     print(x_test.shape, lx_test.shape)
@@ -207,10 +207,10 @@ if distributed:
     model = DDP(model, device_ids=[local_rank])
 # print(model)
 
-# summary(model, 
-#         x=x.to(DEVICE), 
-#         x_lens=lx, 
-#         y=y.to(DEVICE))
+summary(model, 
+        x=x.to(DEVICE), 
+        x_lens=lx, 
+        y=y.to(DEVICE))
 
 
 optimizer   = torch.optim.AdamW(model.parameters(), lr=config['lr'], amsgrad=True, weight_decay=config['weight_decay'])
@@ -256,47 +256,47 @@ def train(model, dataloader, criterion, optimizer, teacher_forcing_rate):
 
             perplexity  = torch.exp(masked_loss) # Perplexity is defined the exponential of the loss
 
-            running_loss        += masked_loss.item()
-            running_perplexity  += perplexity.item()
-
-        # Backward on the masked loss
-        scaler.scale(masked_loss).backward()
-        # Optional: Use torch.nn.utils.clip_grad_norm to clip gradients to prevent them from exploding, if necessary
-        # If using with mixed precision, unscale the Optimizer First before doing gradient clipping
-        scaler.step(optimizer)
-        scaler.update()
+        running_loss        += masked_loss.item()
+        running_perplexity  += perplexity.item()
 
         batch_bar.set_postfix(
             loss="{:.04f}".format(running_loss/(i+1)),
             perplexity="{:.04f}".format(running_perplexity/(i+1)),
             lr="{:.04f}".format(float(optimizer.param_groups[0]['lr'])),
             tf_rate='{:.02f}'.format(teacher_forcing_rate))
+        # Backward on the masked loss
+        scaler.scale(masked_loss).backward()
+        # Optional: Use torch.nn.utils.clip_grad_norm to clip gradients to prevent them from exploding, if necessary
+        # If using with mixed precision, unscale the Optimizer First before doing gradient clipping
+        scaler.step(optimizer)
+        scaler.update()
         batch_bar.update()
 
         del x, y, lx, ly
-        torch.cuda.empty_cache()
     
+    batch_bar.close()
     running_loss /= len(dataloader)
     running_perplexity /= len(dataloader)
-    batch_bar.close()
 
     return running_loss, running_perplexity, attention_plot
 
 
-def validate(model, dataloader):
+def validate(model, dataloader, criterion):
 
     model.eval()
 
     batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, position=0, leave=False, desc="Val", ncols=5)
 
     running_lev_dist = 0.0
+    running_loss = 0.0
 
     for i, (x, y, lx, ly) in enumerate(dataloader):
         x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx.to(DEVICE), ly.to(DEVICE)
 
         with torch.no_grad():
             predictions, attentions = model(x, lx, y=None)
-            loss        =  criterion(predictions.view(-1, len(VOCAB)), y.view(-1)) # TODO: Cross Entropy Loss
+            batch_size, timesteps = y.shape
+            loss        =  criterion(predictions[:, :y.shape[1], :].reshape(batch_size * timesteps, -1), y.view(-1)) # TODO: Cross Entropy Loss
 
             # TODO: Create a boolean mask using the lengths of your transcript that remove the influence of padding indices 
             # (in transcripts) in the loss 
@@ -322,11 +322,10 @@ def validate(model, dataloader):
         batch_bar.update()
 
         del x, y, lx, ly
-        torch.cuda.empty_cache()
-    
+
+    batch_bar.close()
     running_loss /= len(dataloader)
     running_lev_dist /= len(dataloader)
-    batch_bar.close()
 
     return running_loss, running_lev_dist
 
@@ -358,7 +357,7 @@ for epoch in range(0, config['epochs']):
     curr_lr = float(optimizer.param_groups[0]['lr'])
     # Call train and validate
     train_loss, train_perplexity, attention_plot = train(model, train_loader, criterion, optimizer, config['tf_rate'])
-    val_loss, val_lev_dist = validate(model, val_loader)
+    val_loss, val_lev_dist = validate(model, val_loader, criterion)
     
     # Print your metrics
     print("\nEpoch {}/{}: \nTrain Loss {:.04f}\t  Train Perplexity {:.04f}".format(
@@ -368,7 +367,7 @@ for epoch in range(0, config['epochs']):
           val_loss, val_lev_dist))
     
     # Plot Attention 
-    plot_attention(attention_plot)
+    # plot_attention(attention_plot)
 
     # Log metrics to Wandb
     if local_rank == 0:
@@ -427,7 +426,6 @@ def predict(model, test_loader):
         batch_bar.update()
 
         del x, lx
-        torch.cuda.empty_cache()
       
     batch_bar.close()
     return test_results
@@ -436,7 +434,7 @@ predictions = predict(model, test_loader)
 # TODO: Create a file with all predictions 
 df = pd.read_csv('data/hw4p2/test-clean/transcript/random_submission.csv')
 df.label = predictions
-df.rename(columns={"index": "id"})
+df.rename(columns={"index": "id"}, inplace=True)
 
 df.to_csv('HW4P2/results/submission' + args.exp_name + '.csv', index = False)
 # TODO: Submit to Kaggle
