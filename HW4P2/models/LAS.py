@@ -7,6 +7,36 @@ import math
 
 SOS_TOKEN = 0
 EOS_TOKEN = 29
+
+class LockedDropout(torch.nn.Module):
+    """ LockedDropout applies the same dropout mask to every time step.
+
+    **Thank you** to Sales Force for their initial implementation of :class:`WeightDrop`. Here is
+    their `License <https://github.com/salesforce/awd-lstm-lm/blob/master/LICENSE>`.
+
+    Args:
+        dropout (float): Probability of an element in the dropout mask to be zeroed.
+    """
+
+    def __init__(self, dropout=0.35):
+        super().__init__()
+        self.dropout = dropout
+
+    def forward(self, x):
+        """
+        Args:
+            x (`torch.FloatTensor` [sequence length, batch size, rnn hidden size]): 
+                Input to apply dropout.
+        """
+        if not self.training or not self.dropout:
+            return x
+        
+        # T, B, C -> B, T, C
+        mask = x.new_empty(x.size(0), 1, x.size(2), requires_grad=False).bernoulli_(1 - self.dropout)
+        mask = mask.div_(1 - self.dropout)
+        mask = mask.expand_as(x)
+        return mask * x
+
 class pBLSTM(torch.nn.Module):
 
     '''
@@ -25,11 +55,13 @@ class pBLSTM(torch.nn.Module):
     To make our implementation modular, we pass 1 layer at a time.
     '''
     
-    def __init__(self, input_size, hidden_size, dropout):
+    def __init__(self, input_size, hidden_size, dropout, locked_dropout=0.35):
         super(pBLSTM, self).__init__()
         # TODO: Initialize a single layer bidirectional LSTM with the given input_size and hidden_size
-        self.blstm = nn.LSTM(input_size, hidden_size, num_layers=1, batch_first=True,
+        self.blstm = nn.LSTM(input_size, hidden_size, num_layers=2, batch_first=True,
                             dropout=dropout, bidirectional=True)
+        
+        self.dropout = LockedDropout(locked_dropout)
 
     def forward(self, x, x_lens): # x_packed is a PackedSequence
 
@@ -40,6 +72,7 @@ class pBLSTM(torch.nn.Module):
         # Call self.trunc_reshape() which downsamples the time steps of x and increases the feature dimensions as mentioned above
         # self.trunc_reshape will return 2 outputs. What are they? Think about what quantites are changing.
         x, x_lens = self.trunc_reshape(x, x_lens)
+        x = self.dropout(x)
         # TODO: Pack Padded Sequence. What output(s) would you get?
         x_packed = pack_padded_sequence(x, x_lens.cpu(), batch_first=True, enforce_sorted=False)
         # TODO: Pass the sequence through bLSTM
@@ -65,7 +98,7 @@ class Listener(torch.nn.Module):
     '''
     The Encoder takes utterances as inputs and returns latent feature representations
     '''
-    def __init__(self, input_size, encoder_hidden_size=256, dropout=0):
+    def __init__(self, input_size, encoder_hidden_size=256, dropout=0, locked_dropout=0.35):
         super(Listener, self).__init__()
         # The first LSTM at the very bottom
         self.base_lstm = nn.LSTM(input_size, encoder_hidden_size, batch_first=True, 
@@ -76,7 +109,7 @@ class Listener(torch.nn.Module):
             # Hint: You are downsampling timesteps by a factor of 2, 
             # upsampling features by a factor of 2 and the LSTM is bidirectional)
             # Optional: Dropout/Locked Dropout after each pBLSTM (Not needed for early submission)
-        self.pBLSTMs = nn.ModuleList([pBLSTM(encoder_hidden_size*4, encoder_hidden_size, dropout) for i in range(3)])
+        self.pBLSTMs = nn.ModuleList([pBLSTM(encoder_hidden_size*4, encoder_hidden_size, dropout, locked_dropout) for i in range(3)])
          
     def forward(self, x, x_lens):
         # Where are x and x_lens coming from? The dataloader
@@ -169,7 +202,7 @@ class Attention(torch.nn.Module):
 # Decoder
 class Speller(torch.nn.Module):
 
-    def __init__(self, embed_size, decoder_hidden_size, decoder_output_size, vocab_size, device, attention_module=None):
+    def __init__(self, embed_size, decoder_hidden_size, decoder_output_size, vocab_size, dropout, attention_module=None, device='cpu'):
         super().__init__()
         self.device             = device
 
@@ -184,11 +217,13 @@ class Speller(torch.nn.Module):
                                 # What should the input_size of the first LSTM Cell? 
                                 # Hint: It takes in a combination of the character embedding and context from attention
                                     nn.LSTMCell(embed_size+attention_module.projection_size, decoder_hidden_size),
+                                    nn.LSTMCell(decoder_hidden_size, decoder_hidden_size),
                                     nn.LSTMCell(decoder_hidden_size, decoder_output_size)
                                 )
     
                                 # We are using LSTMCells because process individual time steps inputs and not the whole sequence.
                                 # Think why we need this in terms of the query
+        self.dropout           = nn.Dropout(dropout)
 
         # TODO: Initialize the classification layer to generate your probability distribution over all characters
         self.char_prob          = nn.Linear(attention_module.projection_size+decoder_output_size, vocab_size) 
@@ -255,7 +290,8 @@ class Speller(torch.nn.Module):
                 # An LSTM Cell returns (h,c) -> h = hidden state, c = cell memory state
                 # Using 2 LSTM Cells is akin to a 2 layer LSTM looped through t timesteps 
                 # The second LSTM Cell takes in the output hidden state of the first LSTM Cell (from the current timestep) as Input, along with the hidden and cell states of the cell from the previous timestep
-                hidden_states[i] = self.lstm_cells[i](decoder_input_embedding, hidden_states[i]) 
+                hidden_states[i] = self.lstm_cells[i](decoder_input_embedding, hidden_states[i])
+                hidden_states[i] = (self.dropout(hidden_states[i][0]), hidden_states[i][1]) # Apply dropout to the hidden state
                 decoder_input_embedding = hidden_states[i][0]
 
             # The output embedding from the decoder is the hidden state of the last LSTM Cell
@@ -289,15 +325,15 @@ class Speller(torch.nn.Module):
 class LAS(torch.nn.Module):
     def __init__(self, input_size, encoder_hidden_size, 
                  vocab_size, embed_size,
-                 decoder_hidden_size, decoder_output_size,
-                 device,
-                 projection_size=128):
+                 decoder_hidden_size, decoder_output_size, projection_size,
+                 locked_dropout, dropout,
+                 device):
         
         super(LAS, self).__init__()
 
-        self.encoder        = Listener(input_size, encoder_hidden_size, 0.2) # TODO: Initialize Encoder
+        self.encoder        = Listener(input_size, encoder_hidden_size, dropout, locked_dropout=locked_dropout) # TODO: Initialize Encoder
         attention_module    = Attention(encoder_hidden_size, decoder_output_size, projection_size, device)# TODO: Initialize Attention
-        self.decoder        = Speller(embed_size, decoder_hidden_size, decoder_output_size, vocab_size, device, attention_module)# TODO: Initialize Decoder, make sure you pass the attention module 
+        self.decoder        = Speller(embed_size, decoder_hidden_size, decoder_output_size, vocab_size, dropout, attention_module, device)# TODO: Initialize Decoder, make sure you pass the attention module 
 
     def forward(self, x, x_lens, y=None, tf_rate=1):
 

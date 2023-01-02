@@ -72,9 +72,9 @@ config = {
     "batch_size"      : batch_size,
     "num_workers"     : 24, # mac 0
 
-    "architecture"    : "LAS",
-    "tf_rate"         : 1.0,
-    "dropout"         : 0.0,
+    "encoder_hidden_size" : 512,
+    "locked_dropout"      : 0.35,
+    "dropout"         : 0.2,
 
     "epochs"          : 70,
     "lr"              : 1e-3,
@@ -195,11 +195,11 @@ model = LAS(
     # Read the paper and think about what dimensions should be used
     # You can experiment on these as well, but they are not requried for the early submission
     # Remember that if you are using weight tying, some sizes need to be the same
-    input_size, encoder_hidden_size=256,
+    input_size, encoder_hidden_size=config['encoder_hidden_size'],
     vocab_size=len(VOCAB), embed_size=256,
-    decoder_hidden_size=512, decoder_output_size=128,
+    decoder_hidden_size=512, decoder_output_size=128, projection_size=128,
+    locked_dropout=config['locked_dropout'], dropout=config['dropout'],
     device=DEVICE,
-    projection_size=128
 )
 
 model = model.to(DEVICE)
@@ -241,6 +241,14 @@ def train(model, dataloader, criterion, optimizer, teacher_forcing_rate):
             # So in total, you have batch_size*timesteps amount of characters.
             # Similarly, in predictions, you have batch_size*timesteps amount of probability distributions.
             # How do you need to modify transcipts and predictions so that you can calculate the CrossEntropyLoss? Hint: Use Reshape/View and read the docs
+            
+            # the label y starts from <sos> but the predictions start from the first character after <sos>
+            # remove sos to y
+            y = y[:, 1:]
+            ly = ly - 1
+            # add eos to y
+            y = torch.cat((y, torch.ones((y.shape[0], 1), dtype=torch.long).to(DEVICE)*EOS_TOKEN), dim=1)
+            
             loss        =  criterion(predictions.view(-1, len(VOCAB)), y.view(-1)) # TODO: Cross Entropy Loss
 
             # TODO: Create a boolean mask using the lengths of your transcript that remove the influence of padding indices 
@@ -296,6 +304,14 @@ def validate(model, dataloader, criterion):
         with torch.no_grad():
             predictions, attentions = model(x, lx, y=None)
             batch_size, timesteps = y.shape
+
+            # the label y starts from <sos> but the predictions start from the first character after <sos>
+            # remove sos to y
+            y = y[:, 1:]
+            ly = ly - 1
+            # add eos to y
+            y = torch.cat((y, torch.ones((y.shape[0], 1), dtype=torch.long).to(DEVICE)*EOS_TOKEN), dim=1)
+
             loss        =  criterion(predictions[:, :y.shape[1], :].reshape(batch_size * timesteps, -1), y.view(-1)) # TODO: Cross Entropy Loss
 
             # TODO: Create a boolean mask using the lengths of your transcript that remove the influence of padding indices 
@@ -309,7 +325,7 @@ def validate(model, dataloader, criterion):
             masked_loss = mask*loss # Product between the mask and the loss, divided by the mask's sum. Hint: You may want to reshape the mask too 
             masked_loss = masked_loss.mean()
 
-            running_loss        += masked_loss.item()
+        running_loss        += masked_loss.item()
 
         # Greedy Decoding
         greedy_predictions   = torch.argmax(predictions, dim=2) # TODO: How do you get the most likely character from each distribution in the batch?
@@ -353,10 +369,11 @@ torch.cuda.empty_cache()
 gc.collect()
 
 best_lev_dist = float("inf")
+tf_rate = 1.0
 for epoch in range(0, config['epochs']):
     curr_lr = float(optimizer.param_groups[0]['lr'])
     # Call train and validate
-    train_loss, train_perplexity, attention_plot = train(model, train_loader, criterion, optimizer, config['tf_rate'])
+    train_loss, train_perplexity, attention_plot = train(model, train_loader, criterion, optimizer, tf_rate)
     val_loss, val_lev_dist = validate(model, val_loader, criterion)
     
     # Print your metrics
@@ -367,13 +384,14 @@ for epoch in range(0, config['epochs']):
           val_loss, val_lev_dist))
     
     # Plot Attention 
-    # plot_attention(attention_plot)
+    plot_attention(attention_plot, epoch)
 
     # Log metrics to Wandb
     if local_rank == 0:
         wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
-                   "validation_dist":val_lev_dist, "learning_rate": curr_lr,
-                   "best_dist": best_lev_dist})
+                   "validation_dist":val_lev_dist, "best_dist": best_lev_dist,
+                   "learning_rate": curr_lr, "teacher_force_rate": tf_rate,
+                   })
 
     # Optional: Scheduler Step / Teacher Force Schedule Step
     if val_lev_dist <= best_lev_dist:
@@ -386,7 +404,9 @@ for epoch in range(0, config['epochs']):
                     'val_loss': val_lev_dist, 
                     'epoch': epoch}, path)
 
-    scheduler.step(val_lev_dist)
+    if val_lev_dist < 20:
+        scheduler.step(val_lev_dist)
+        tf_rate = tf_rate * 0.985 
 
 if local_rank == 0:
     run.finish()

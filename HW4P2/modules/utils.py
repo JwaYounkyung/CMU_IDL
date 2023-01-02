@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 
 import Levenshtein
 
+import os
+
 SOS_TOKEN = 0
 EOS_TOKEN = 29
 
@@ -19,12 +21,14 @@ def set_random_seed(seed_num=1):
 	torch.backends.cudnn.deterministic = True
 	torch.backends.cudnn.benchmark = False
 
-def plot_attention(attention): 
+def plot_attention(attention, epoch): 
     # Function for plotting attention
     # You need to get a diagonal plot
     plt.clf()
     sns.heatmap(attention, cmap='GnBu')
-    plt.show()
+    os.makedirs("results/plot/", exist_ok=True)
+    plt.savefig("results/plot/" + str(epoch) + ".png")
+    # plt.show()
 
 # We have given you this utility function which takes a sequence of indices and converts them to a list of characters
 def indices_to_chars(indices, vocab):
