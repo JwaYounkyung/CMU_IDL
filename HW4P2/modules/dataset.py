@@ -3,6 +3,7 @@ import os
 import numpy as np
 from torch.nn.utils.rnn import pad_sequence
 
+SOS_TOKEN = 0
 EOS_TOKEN = 29
 
 # Dataset class for the Toy dataset
@@ -85,7 +86,6 @@ class AudioDataset(torch.utils.data.Dataset):
             # 수정 
             # Cepstral Normalization of mfcc (train, test both)
             transcript = np.load(self.transcript_files[i])
-            transcript = transcript[1:-1] # Remove [SOS] and [EOS]
             transcript = [self.phonems_ind[phonem] for phonem in transcript]
             self.mfccs.append(mfcc)
             self.transcripts.append(transcript)
@@ -113,6 +113,8 @@ class AudioDataset(torch.utils.data.Dataset):
         TODO: RETURN THE MFCC COEFFICIENTS AND ITS CORRESPONDING LABELS
         '''
         mfcc = torch.FloatTensor(self.mfccs[ind]) # TODO
+        mfcc = (mfcc - mfcc.mean(axis=0))/mfcc.std(axis=0)
+
         transcript = torch.tensor(self.transcripts[ind]) # TODO
 
         # 수정
@@ -199,7 +201,8 @@ class AudioDatasetTest(torch.utils.data.Dataset):
         TODO: RETURN THE MFCC COEFFICIENTS AND ITS CORRESPONDING LABELS
         '''
         mfcc = torch.FloatTensor(self.mfccs[ind]) # TODO
-        # 수정
+        mfcc = (mfcc - mfcc.mean(axis=0))/mfcc.std(axis=0)
+
         return mfcc
 
 

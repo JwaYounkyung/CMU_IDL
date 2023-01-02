@@ -25,6 +25,9 @@ from models.LAS import Listener, Attention, LAS
 
 import argparse
 
+import warnings
+warnings.filterwarnings('ignore')
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument('--distributed', type=bool, default=False)
@@ -41,7 +44,7 @@ set_random_seed(seed_num=1)
 # multi gpu
 distributed = args.distributed
 local_rank, gpu_ids = 0, [0, 1, 2, 3, 4, 5, 6, 7]
-batch_size = 96
+batch_size = 128
 
 if distributed:
     gpu_no = len(gpu_ids)
@@ -73,11 +76,11 @@ config = {
     "tf_rate"         : 1.0,
     "dropout"         : 0.0,
 
-    "epochs"          : 30,
+    "epochs"          : 70,
     "lr"              : 1e-3,
     "weight_decay"    : 5e-6,
-    "step_size"       : 2,
-    "scheduler_gamma" : 0.9,
+    "step_size"       : 5,
+    "scheduler_gamma" : 0.5,
 }
 
 if args.toy:
@@ -210,11 +213,11 @@ if distributed:
 #         y=y.to(DEVICE))
 
 
-optimizer   = torch.optim.Adam(model.parameters(), lr=config['lr'], amsgrad=True, weight_decay=config['weight_decay'])
+optimizer   = torch.optim.AdamW(model.parameters(), lr=config['lr'], amsgrad=True, weight_decay=config['weight_decay'])
 criterion   = torch.nn.CrossEntropyLoss(reduction='none') # Why are we using reduction = 'none' ? 
 scaler      = torch.cuda.amp.GradScaler()
 # Optional: Create a custom class for a Teacher Force Schedule 
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', 
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', min_lr=2e-8, 
                 patience=config['step_size'], factor=config['scheduler_gamma'])
 
 def train(model, dataloader, criterion, optimizer, teacher_forcing_rate):
@@ -249,31 +252,33 @@ def train(model, dataloader, criterion, optimizer, teacher_forcing_rate):
             
             mask = mask.view(-1)
             masked_loss = mask*loss # Product between the mask and the loss, divided by the mask's sum. Hint: You may want to reshape the mask too 
+            masked_loss = masked_loss.mean()
 
-            perplexity  = torch.exp(masked_loss.mean()) # Perplexity is defined the exponential of the loss
+            perplexity  = torch.exp(masked_loss) # Perplexity is defined the exponential of the loss
 
-        running_loss        += masked_loss.mean().item()
-        running_perplexity  += perplexity.item()
+            running_loss        += masked_loss.item()
+            running_perplexity  += perplexity.item()
+
+        # Backward on the masked loss
+        scaler.scale(masked_loss).backward()
+        # Optional: Use torch.nn.utils.clip_grad_norm to clip gradients to prevent them from exploding, if necessary
+        # If using with mixed precision, unscale the Optimizer First before doing gradient clipping
+        scaler.step(optimizer)
+        scaler.update()
 
         batch_bar.set_postfix(
             loss="{:.04f}".format(running_loss/(i+1)),
             perplexity="{:.04f}".format(running_perplexity/(i+1)),
             lr="{:.04f}".format(float(optimizer.param_groups[0]['lr'])),
             tf_rate='{:.02f}'.format(teacher_forcing_rate))
-        # Backward on the masked loss
-        scaler.scale(masked_loss.mean()).backward()
-        # Optional: Use torch.nn.utils.clip_grad_norm to clip gradients to prevent them from exploding, if necessary
-        # If using with mixed precision, unscale the Optimizer First before doing gradient clipping
-        scaler.step(optimizer)
-        scaler.update()
         batch_bar.update()
 
         del x, y, lx, ly
-        #torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
     
-    batch_bar.close()
     running_loss /= len(dataloader)
     running_perplexity /= len(dataloader)
+    batch_bar.close()
 
     return running_loss, running_perplexity, attention_plot
 
@@ -291,8 +296,20 @@ def validate(model, dataloader):
 
         with torch.no_grad():
             predictions, attentions = model(x, lx, y=None)
-            running_loss = 0.0
-            running_perplexity = 0.0
+            loss        =  criterion(predictions.view(-1, len(VOCAB)), y.view(-1)) # TODO: Cross Entropy Loss
+
+            # TODO: Create a boolean mask using the lengths of your transcript that remove the influence of padding indices 
+            # (in transcripts) in the loss 
+            mask        = torch.ones_like(y) # TODO: Create a mask of the same shape as y
+            for i in range(ly.shape[0]):
+                if ly[i] < y.shape[1]:
+                    mask[i, ly[i]:] = 0
+            
+            mask = mask.view(-1)
+            masked_loss = mask*loss # Product between the mask and the loss, divided by the mask's sum. Hint: You may want to reshape the mask too 
+            masked_loss = masked_loss.mean()
+
+            running_loss        += masked_loss.item()
 
         # Greedy Decoding
         greedy_predictions   = torch.argmax(predictions, dim=2) # TODO: How do you get the most likely character from each distribution in the batch?
@@ -306,11 +323,12 @@ def validate(model, dataloader):
 
         del x, y, lx, ly
         torch.cuda.empty_cache()
-
-    batch_bar.close()
+    
+    running_loss /= len(dataloader)
     running_lev_dist /= len(dataloader)
+    batch_bar.close()
 
-    return running_loss, running_perplexity, running_lev_dist
+    return running_loss, running_lev_dist
 
 
 # Login to Wandb
@@ -340,18 +358,24 @@ for epoch in range(0, config['epochs']):
     curr_lr = float(optimizer.param_groups[0]['lr'])
     # Call train and validate
     train_loss, train_perplexity, attention_plot = train(model, train_loader, criterion, optimizer, config['tf_rate'])
-    val_loss, val_perplexity, val_lev_dist = validate(model, val_loader)
+    val_loss, val_lev_dist = validate(model, val_loader)
     
     # Print your metrics
     print("\nEpoch {}/{}: \nTrain Loss {:.04f}\t  Train Perplexity {:.04f}".format(
           epoch + 1, config['epochs'], train_loss, train_perplexity))
 
-    print("Val Loss {:.04f}\t Val Perplexity {:.04f}\t Val Levenshtein Distance {:.04f}".format(
-          val_loss, val_perplexity, val_lev_dist))
+    print("Val Loss {:.04f}\t Val Levenshtein Distance {:.04f}".format(
+          val_loss, val_lev_dist))
+    
     # Plot Attention 
-    # plot_attention(attention_plot)
+    plot_attention(attention_plot)
 
     # Log metrics to Wandb
+    if local_rank == 0:
+        wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
+                   "validation_dist":val_lev_dist, "learning_rate": curr_lr,
+                   "best_dist": best_lev_dist})
+
     # Optional: Scheduler Step / Teacher Force Schedule Step
     if val_lev_dist <= best_lev_dist:
         best_lev_dist = val_lev_dist
@@ -362,15 +386,8 @@ for epoch in range(0, config['epochs']):
         torch.save({'model_state_dict':model.state_dict(),
                     'val_loss': val_lev_dist, 
                     'epoch': epoch}, path)
-    if local_rank == 0:
-        wandb.save('checkpoint.pth')
 
-    if local_rank == 0:
-        wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
-                   "validation_dist":val_lev_dist, "learning_rate": curr_lr,
-                   "best_dist": best_lev_dist})
-    
-    # scheduler.step(val_lev_dist)
+    scheduler.step(val_lev_dist)
 
 if local_rank == 0:
     run.finish()
@@ -397,8 +414,7 @@ def predict(model, test_loader):
     batch_bar = tqdm(total=len(test_loader), dynamic_ncols=True, position=0, leave=False, desc='Test', ncols=5)
     test_results = []
   
-    for i, data in enumerate(test_loader):
-        x, lx = data
+    for i, (x, lx) in enumerate(test_loader):
         x, lx = x.to(DEVICE), lx.to(DEVICE)
 
         with torch.no_grad():
@@ -409,6 +425,9 @@ def predict(model, test_loader):
         test_results.extend(pred_str)
         
         batch_bar.update()
+
+        del x, lx
+        torch.cuda.empty_cache()
       
     batch_bar.close()
     return test_results

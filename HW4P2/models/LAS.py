@@ -43,7 +43,7 @@ class pBLSTM(torch.nn.Module):
         # TODO: Pack Padded Sequence. What output(s) would you get?
         x_packed = pack_padded_sequence(x, x_lens.cpu(), batch_first=True, enforce_sorted=False)
         # TODO: Pass the sequence through bLSTM
-        x, (hidden, cell) = self.blstm(x_packed)
+        x, _ = self.blstm(x_packed)
 
         # What do you return?
         return x, x_lens
@@ -52,9 +52,9 @@ class pBLSTM(torch.nn.Module):
         # TODO: If you have odd number of timesteps, how can you handle it? (Hint: You can exclude them)
         if x.shape[1]%2 != 0:
             x = x[:, :-1, :]
-            x_lens = x_lens - 1
+
         # TODO: Reshape x. When reshaping x, you have to reduce number of timesteps by a downsampling factor while increasing number of features by the same factor
-        x = x.reshape(x.shape[0], x.shape[1]//2, 2*x.shape[2])
+        x = x.reshape(x.shape[0], x.shape[1]//2, x.shape[2]*2)
         # TODO: Reduce lengths by the same downsampling factor
         x_lens = torch.div(x_lens, 2, rounding_mode='floor')
 
@@ -68,7 +68,7 @@ class Listener(torch.nn.Module):
     def __init__(self, input_size, encoder_hidden_size=256, dropout=0):
         super(Listener, self).__init__()
         # The first LSTM at the very bottom
-        self.base_lstm = nn.LSTM(input_size, 256, batch_first=True, 
+        self.base_lstm = nn.LSTM(input_size, encoder_hidden_size, batch_first=True, 
                                  dropout=dropout, bidirectional=True)#TODO: Fill this up
 
         # self.pBLSTMs = nn.Sequential() # How many pBLSTMs are required?
@@ -76,7 +76,7 @@ class Listener(torch.nn.Module):
             # Hint: You are downsampling timesteps by a factor of 2, 
             # upsampling features by a factor of 2 and the LSTM is bidirectional)
             # Optional: Dropout/Locked Dropout after each pBLSTM (Not needed for early submission)
-        self.pBLSTMs = nn.ModuleList([pBLSTM(1024, encoder_hidden_size, dropout) for i in range(3)])
+        self.pBLSTMs = nn.ModuleList([pBLSTM(encoder_hidden_size*4, encoder_hidden_size, dropout) for i in range(3)])
          
     def forward(self, x, x_lens):
         # Where are x and x_lens coming from? The dataloader
@@ -84,7 +84,7 @@ class Listener(torch.nn.Module):
         # TODO: Pack Padded Sequence
         x_packed = pack_padded_sequence(x, x_lens.cpu(), batch_first=True, enforce_sorted=False)
         # TODO: Pass it through the first LSTM layer (no truncation)
-        x_packed, (hidden, cell) = self.base_lstm(x_packed)
+        x_packed, _ = self.base_lstm(x_packed)
         # TODO: Pass Sequence through the pyramidal Bi-LSTM layer
         encoder_outputs, encoder_lens = x_packed, x_lens
         for f in self.pBLSTMs:
@@ -155,12 +155,11 @@ class Attention(torch.nn.Module):
 
         # Hint: Take a look at torch.bmm for the products below 
 
-        raw_weights        = torch.bmm(self.query.unsqueeze(1), torch.transpose(self.key, 1, 2)).squeeze(dim=1)# TODO: Calculate raw_weights which is the product of query and key, and is of shape (batch_size, timesteps)
-        raw_weights        = raw_weights / math.sqrt(self.query.shape[-1])# TODO: Divide raw_weights by the square root of the projection size   
-        masked_raw_weights = raw_weights.masked_fill_(self.padding_mask==0, -1e4)# TODO: Mask the raw_weights with self.padding_mask. 
+        raw_weights        = torch.bmm(self.key, self.query.unsqueeze(2)).squeeze(2)# TODO: Calculate raw_weights which is the product of query and key, and is of shape (batch_size, timesteps)
+        masked_raw_weights = raw_weights.masked_fill_(self.padding_mask==0, -float('inf'))# TODO: Mask the raw_weights with self.padding_mask. 
         # Take a look at pytorch's masked_fill_ function (You want the fill value to be a big negative number for the softmax to make it close to 0)
 
-        attention_weights  = self.softmax(masked_raw_weights)# TODO: Calculate the attention weights, which is the softmax of raw_weights
+        attention_weights  = self.softmax(masked_raw_weights/math.sqrt(self.query.shape[-1]) )# TODO: Calculate the attention weights, which is the softmax of raw_weights
         context            = torch.bmm(attention_weights.unsqueeze(1), self.value).squeeze(dim=1)# TODO: Calculate the context - it is a product between attention_weights and value
 
         # Hint: You might need to use squeeze/unsqueeze to make sure that your operations work with bmm
@@ -184,15 +183,15 @@ class Speller(torch.nn.Module):
                                 # Create Two LSTM Cells as per LAS Architecture
                                 # What should the input_size of the first LSTM Cell? 
                                 # Hint: It takes in a combination of the character embedding and context from attention
-                                nn.LSTMCell(embed_size+attention_module.projection_size, decoder_hidden_size),
-                                nn.LSTMCell(decoder_hidden_size, decoder_output_size)
+                                    nn.LSTMCell(embed_size+attention_module.projection_size, decoder_hidden_size),
+                                    nn.LSTMCell(decoder_hidden_size, decoder_output_size)
                                 )
     
                                 # We are using LSTMCells because process individual time steps inputs and not the whole sequence.
                                 # Think why we need this in terms of the query
 
         # TODO: Initialize the classification layer to generate your probability distribution over all characters
-        self.char_prob          = nn.Linear(decoder_output_size*2, vocab_size) 
+        self.char_prob          = nn.Linear(attention_module.projection_size+decoder_output_size, vocab_size) 
 
         self.char_prob.weight   = self.embedding.weight # Weight tying
 
@@ -226,13 +225,12 @@ class Speller(torch.nn.Module):
         hidden_states   = [None]*len(self.lstm_cells) 
 
         attention_plot          = []
+        context                 = torch.zeros(batch_size, self.attention.projection_size).to(self.device) # TODO: Initialize context (You have a few choices, refer to the writeup )
         attention_weights       = torch.zeros(batch_size, encoder_max_seq_len).to(self.device) # Attention Weights are zero if not using Attend Module
 
         # Set Attention Key, Value, Padding Mask just once
         if self.attention != None:
             self.attention.set_key_value_mask(encoder_outputs, encoder_lens)
-
-        context = self.attention.key[:,0,:]# TODO: Initialize context (You have a few choices, refer to the writeup )
 
         for t in range(timesteps):
             
@@ -244,7 +242,7 @@ class Speller(torch.nn.Module):
                 # Using the embedding of the transcript character is teacher forcing, it is very important for faster convergence
                 # Use a comparison between a random probability and your teacher forcing rate, to decide which embedding to use
                 
-                if random.random() <= tf_rate:
+                if random.random() < tf_rate:
                     char_embed = label_embed[:,t-1,:]
       
             # TODO: What do we want to concatenate as input to the decoder? (Use torch.cat)
@@ -272,7 +270,7 @@ class Speller(torch.nn.Module):
             # TODO: Concatenate the projected query with context for the output embedding
             # Hint: How can you get the projected query from attention
             # If you are not using attention, what will you use instead of query?
-            output_embedding     = torch.cat((decoder_output_embedding, context), dim=1)
+            output_embedding     = torch.cat((self.attention.query, context), dim=1)
 
             char_prob            = self.char_prob(output_embedding)
             
@@ -297,7 +295,7 @@ class LAS(torch.nn.Module):
         
         super(LAS, self).__init__()
 
-        self.encoder        = Listener(input_size, encoder_hidden_size, 0) # TODO: Initialize Encoder
+        self.encoder        = Listener(input_size, encoder_hidden_size, 0.2) # TODO: Initialize Encoder
         attention_module    = Attention(encoder_hidden_size, decoder_output_size, projection_size, device)# TODO: Initialize Attention
         self.decoder        = Speller(embed_size, decoder_hidden_size, decoder_output_size, vocab_size, device, attention_module)# TODO: Initialize Decoder, make sure you pass the attention module 
 

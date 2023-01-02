@@ -30,9 +30,9 @@ def plot_attention(attention):
 def indices_to_chars(indices, vocab):
     tokens = []
     for i in indices: # This loops through all the indices
-        if vocab[int(i)] == SOS_TOKEN: # If SOS is encountered, dont add it to the final list
+        if int(i) == SOS_TOKEN: # If SOS is encountered, dont add it to the final list
             continue
-        elif voca b[int(i)] == EOS_TOKEN: # If EOS is encountered, stop the decoding process
+        elif int(i) == EOS_TOKEN: # If EOS is encountered, stop the decoding process
             break
         else:
             tokens.append(vocab[i])
