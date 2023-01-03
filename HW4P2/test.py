@@ -28,6 +28,7 @@ import argparse
 import warnings
 warnings.filterwarnings('ignore')
 
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(__file__)
     parser.add_argument('--distributed', type=bool, default=False)
@@ -43,8 +44,8 @@ set_random_seed(seed_num=1)
 
 # multi gpu
 distributed = args.distributed
-local_rank, gpu_ids = 0, [0, 1, 2, 3]#, 4, 5, 6, 7]
-batch_size = 32
+local_rank, gpu_ids = 0, [0, 1, 2, 3]
+batch_size = 16
 
 if distributed:
     gpu_no = len(gpu_ids)
@@ -64,17 +65,19 @@ if distributed and device != 'cpu':
     dist.init_process_group(backend='nccl', init_method='env://')
     print('local_rank', local_rank)
 
+if device != 'cpu' and distributed:
+    batch_size *= len(gpu_ids)
+
 # Global config dict.
 config = {
     "batch_size"      : batch_size,
-    "real_batch_size" : batch_size * gpu_no,
     "num_workers"     : 24, # mac 0
 
     "encoder_hidden_size" : 512,
     "locked_dropout"      : 0.35,
     "dropout"         : 0.2,
 
-    "epochs"          : 100,
+    "epochs"          : 70,
     "lr"              : 1e-3,
     "weight_decay"    : 5e-6,
     "step_size"       : 3,
@@ -153,7 +156,7 @@ test_loader = torch.utils.data.DataLoader(test_data, num_workers=config['num_wor
                                           batch_size=config['batch_size'], pin_memory=True, 
                                           shuffle=False, collate_fn=test_data.collate_fn)
 
-print("Real batch size: ", config['real_batch_size'])
+print("Batch size: ", config['batch_size'])
 print("Train dataset samples = {}, batches = {}".format(train_data.__len__(), len(train_loader)))
 print("Val dataset samples = {}, batches = {}".format(val_data.__len__(), len(val_loader)))
 print("Test dataset samples = {}, batches = {}".format(test_data.__len__(), len(test_loader)))
@@ -218,194 +221,6 @@ scaler      = torch.cuda.amp.GradScaler()
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', min_lr=2e-8, 
                 patience=config['step_size'], factor=config['scheduler_gamma'])
 
-def train(model, dataloader, criterion, optimizer, teacher_forcing_rate):
-
-    model.train()
-    batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, leave=False, position=0, desc='Train', ncols=5)
-
-    running_loss        = 0.0
-    running_perplexity  = 0.0
-    
-    for i, (x, y, lx, ly) in enumerate(dataloader):
-        optimizer.zero_grad()
-
-        x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx.to(DEVICE), ly.to(DEVICE)
-
-        with torch.cuda.amp.autocast():
-            predictions, attention_plot = model(x, lx, y=y, tf_rate=teacher_forcing_rate)
-
-            # Predictions are of Shape (batch_size, timesteps, vocab_size). 
-            # Transcripts are of shape (batch_size, timesteps) Which means that you have batch_size amount of batches with timestep number of tokens.
-            # So in total, you have batch_size*timesteps amount of characters.
-            # Similarly, in predictions, you have batch_size*timesteps amount of probability distributions.
-            # How do you need to modify transcipts and predictions so that you can calculate the CrossEntropyLoss? Hint: Use Reshape/View and read the docs
-            
-            # # the label y starts from <sos> but the predictions start from the first character after <sos>
-            # # remove sos to y
-            # y = y[:, 1:]
-            # ly = ly - 1
-            # # add eos to y
-            # y = torch.cat((y, torch.ones((y.shape[0], 1), dtype=torch.long).to(DEVICE)*EOS_TOKEN), dim=1)
-            
-            loss        =  criterion(predictions.view(-1, len(VOCAB)), y.view(-1)) # TODO: Cross Entropy Loss
-
-            # TODO: Create a boolean mask using the lengths of your transcript that remove the influence of padding indices 
-            # (in transcripts) in the loss 
-            mask        = torch.ones_like(y) # TODO: Create a mask of the same shape as y
-            for i in range(ly.shape[0]):
-                if ly[i] < y.shape[1]:
-                    mask[i, ly[i]:] = 0
-            
-            mask = mask.view(-1)
-            masked_loss = mask*loss # Product between the mask and the loss, divided by the mask's sum. Hint: You may want to reshape the mask too 
-            masked_loss = masked_loss.mean()
-
-            perplexity  = torch.exp(masked_loss) # Perplexity is defined the exponential of the loss
-
-            running_loss        += masked_loss.item()
-            running_perplexity  += perplexity.item()
-
-        batch_bar.set_postfix(
-            loss="{:.04f}".format(running_loss/(i+1)),
-            perplexity="{:.04f}".format(running_perplexity/(i+1)),
-            lr="{:.04f}".format(float(optimizer.param_groups[0]['lr'])),
-            tf_rate='{:.02f}'.format(teacher_forcing_rate))
-        # Backward on the masked loss
-        scaler.scale(masked_loss).backward()
-        # Optional: Use torch.nn.utils.clip_grad_norm to clip gradients to prevent them from exploding, if necessary
-        # If using with mixed precision, unscale the Optimizer First before doing gradient clipping
-        scaler.step(optimizer)
-        scaler.update()
-        batch_bar.update()
-
-        del x, y, lx, ly
-    
-    batch_bar.close()
-    running_loss /= len(dataloader)
-    running_perplexity /= len(dataloader)
-
-    return running_loss, running_perplexity, attention_plot
-
-
-def validate(model, dataloader, criterion):
-
-    model.eval()
-
-    batch_bar = tqdm(total=len(dataloader), dynamic_ncols=True, position=0, leave=False, desc="Val", ncols=5)
-
-    running_lev_dist = 0.0
-    running_loss = 0.0
-
-    for i, (x, y, lx, ly) in enumerate(dataloader):
-        x, y, lx, ly = x.to(DEVICE), y.to(DEVICE), lx.to(DEVICE), ly.to(DEVICE)
-
-        with torch.no_grad():
-            predictions, attentions = model(x, lx, y=None)
-            batch_size, timesteps = y.shape
-
-            # # the label y starts from <sos> but the predictions start from the first character after <sos>
-            # # remove sos to y
-            # y = y[:, 1:]
-            # ly = ly - 1
-            # # add eos to y
-            # y = torch.cat((y, torch.ones((y.shape[0], 1), dtype=torch.long).to(DEVICE)*EOS_TOKEN), dim=1)
-
-            loss        =  criterion(predictions[:, :y.shape[1], :].reshape(batch_size * timesteps, -1), y.view(-1)) # TODO: Cross Entropy Loss
-
-            # TODO: Create a boolean mask using the lengths of your transcript that remove the influence of padding indices 
-            # (in transcripts) in the loss 
-            mask        = torch.ones_like(y) # TODO: Create a mask of the same shape as y
-            for i in range(ly.shape[0]):
-                if ly[i] < y.shape[1]:
-                    mask[i, ly[i]:] = 0
-            
-            mask = mask.view(-1)
-            masked_loss = mask*loss # Product between the mask and the loss, divided by the mask's sum. Hint: You may want to reshape the mask too 
-            masked_loss = masked_loss.mean()
-
-            running_loss        += masked_loss.item()
-
-        # Greedy Decoding
-        greedy_predictions   = torch.argmax(predictions, dim=2) # TODO: How do you get the most likely character from each distribution in the batch?
-
-        # Calculate Levenshtein Distance
-        running_lev_dist    += calc_edit_distance(greedy_predictions, y, ly, VOCAB, print_example = False) # You can use print_example = True for one specific index i in your batches if you want
-
-        batch_bar.set_postfix(
-            dist="{:.04f}".format(running_lev_dist/(i+1)))
-        batch_bar.update()
-
-        del x, y, lx, ly
-
-    batch_bar.close()
-    running_loss /= len(dataloader)
-    running_lev_dist /= len(dataloader)
-
-    return running_loss, running_lev_dist
-
-
-# Login to Wandb
-# Initialize your Wandb Run Here
-# Optional: Save your model architecture in a txt file, and save the file to Wandb
-def wandb_init():
-    wandb.login(key="0699a3c4c17f76e3d85a803c4d7039edb8c3a3d9") # enter your wandb key here
-    run = wandb.init(
-        name = "LAS", ## Wandb creates random run names if you skip this field
-        reinit = True, ### Allows reinitalizing runs when you re-run this cell
-        # run_id = ### Insert specific run id here if you want to resume a previous run
-        # resume = "must" ### You need this to resume previous runs, but comment out reinit = True when using this
-        project = "hw4p2", ### Project should be created in your wandb account 
-        config = config ### Wandb Config for your run
-    )
-    return run
-
-if local_rank == 0:
-    run = wandb_init()
-
-
-torch.cuda.empty_cache()
-gc.collect()
-
-best_lev_dist = float("inf")
-tf_rate = 1.0
-for epoch in range(0, config['epochs']):
-    curr_lr = float(optimizer.param_groups[0]['lr'])
-    # Call train and validate
-    train_loss, train_perplexity, attention_plot = train(model, train_loader, criterion, optimizer, tf_rate)
-    val_loss, val_lev_dist = validate(model, val_loader, criterion)
-    
-    if local_rank == 0:
-        # Print your metrics
-        print("\nEpoch {}/{}: \nTrain Loss {:.04f}\t  Train Perplexity {:.04f}".format(
-            epoch + 1, config['epochs'], train_loss, train_perplexity))
-
-        print("Val Loss {:.04f}\t Val Levenshtein Distance {:.04f}".format(
-            val_loss, val_lev_dist))
-        
-        # Plot Attention 
-        plot_attention(attention_plot, epoch)
-        wandb.log({"train_loss":train_loss, "validation_loss": val_loss,
-                   "validation_dist":val_lev_dist, "best_dist": best_lev_dist,
-                   "learning_rate": curr_lr, "teacher_force_rate": tf_rate,
-                   })
-
-    # Optional: Scheduler Step / Teacher Force Schedule Step
-    if val_lev_dist <= best_lev_dist:
-        best_lev_dist = val_lev_dist
-        # Save your model checkpoint here
-        os.makedirs(args.model_dir, exist_ok=True)
-        path = os.path.join(args.model_dir, 'checkpoint' + '.pth')
-        # print("Saving model")
-        torch.save({'model_state_dict':model.state_dict(),
-                    'val_loss': val_lev_dist, 
-                    'epoch': epoch}, path)
-
-    if val_lev_dist < 25:
-        scheduler.step(val_lev_dist)
-        tf_rate = tf_rate * 0.985 
-
-if local_rank == 0:
-    run.finish()
 
 # Optional: Load your best model Checkpoint here
 path = os.path.join(args.model_dir, 'checkpoint' + '.pth')

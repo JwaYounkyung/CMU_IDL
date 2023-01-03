@@ -26,8 +26,8 @@ def plot_attention(attention, epoch):
     # You need to get a diagonal plot
     plt.clf()
     sns.heatmap(attention, cmap='GnBu')
-    os.makedirs("results/plot/", exist_ok=True)
-    plt.savefig("results/plot/" + str(epoch) + ".png")
+    os.makedirs("HW4P2/results/plot/", exist_ok=True)
+    plt.savefig("HW4P2/results/plot/" + str(epoch) + ".png")
     # plt.show()
 
 # We have given you this utility function which takes a sequence of indices and converts them to a list of characters
