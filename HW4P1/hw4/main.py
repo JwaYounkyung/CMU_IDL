@@ -12,10 +12,10 @@ from tqdm import tqdm
 device = f'cuda' if torch.cuda.is_available() else 'cpu'
 
 # TODO: define other hyperparameters here
-NUM_EPOCHS = 10
-BATCH_SIZE = 2
-EMB_DIM = 64
-HIDDEN_SIZE = 128
+NUM_EPOCHS = 20
+BATCH_SIZE = 128
+EMB_DIM = 512
+HIDDEN_SIZE = 512
 
 os.chdir('HW4P1/hw4/')
 
@@ -44,7 +44,7 @@ class DataLoaderForLanguageModeling(DataLoader):
         self.batch_size = batch_size # TODO
         self.shuffle = shuffle # TODO 
 
-        self.seq_length = 3
+        self.seq_length = 70
     
     def __len__(self):
         return len(self.dataset) // self.batch_size
@@ -64,7 +64,8 @@ class DataLoaderForLanguageModeling(DataLoader):
         # 3. Group the sequences into batches.
         # seq_len로 데이터 자르기
         if self.dataset.size % self.seq_length != 0:
-            self.dataset = np.concatenate((self.dataset, np.zeros(self.seq_length - self.dataset.size % self.seq_length)), axis=0)
+            self.dataset = self.dataset[:-(self.dataset.size % self.seq_length)]
+            # self.dataset = np.concatenate((self.dataset, np.zeros(self.seq_length - self.dataset.size % self.seq_length)), axis=0)
         
         self.dataset.shape = (self.dataset.size//self.seq_length, self.seq_length)
         dataset_target = np.roll(self.dataset, -1)
@@ -74,6 +75,59 @@ class DataLoaderForLanguageModeling(DataLoader):
             inputs = self.dataset[i*self.batch_size:(i+1)*self.batch_size, :]
             targets = dataset_target[i*self.batch_size:(i+1)*self.batch_size, :]
             yield (inputs, targets)
+
+class LockedDropout(torch.nn.Module):
+    """ LockedDropout applies the same dropout mask to every time step.
+
+    **Thank you** to Sales Force for their initial implementation of :class:`WeightDrop`. Here is
+    their `License <https://github.com/salesforce/awd-lstm-lm/blob/master/LICENSE>`.
+
+    Args:
+        dropout (float): Probability of an element in the dropout mask to be zeroed.
+    """
+
+    def __init__(self, dropout=0.35):
+        super().__init__()
+        self.dropout = dropout
+
+    def forward(self, x):
+        """
+        Args:
+            x (`torch.FloatTensor` [sequence length, batch size, rnn hidden size]): 
+                Input to apply dropout.
+        """
+        if not self.training or not self.dropout:
+            return x
+        
+        # T, B, C -> B, T, C
+        mask = x.new_empty(x.size(0), 1, x.size(2), requires_grad=False).bernoulli_(1 - self.dropout)
+        mask = mask.div_(1 - self.dropout)
+        mask = mask.expand_as(x)
+        return mask * x
+
+def embedded_dropout(embed, words, dropout=0.1, scale=None):
+    """ 
+    **Thank you** to Sales Force for their initial implementation. Here is
+    their `License <https://github.com/salesforce/awd-lstm-lm/blob/master/LICENSE>`.
+    """
+    if dropout:
+        mask = embed.weight.data.new().resize_((embed.weight.size(0), 1)).bernoulli_(1 - dropout).expand_as(embed.weight) / (1 - dropout)
+        masked_embed_weight = mask * embed.weight
+    else:
+        masked_embed_weight = embed.weight
+
+    if scale:
+        masked_embed_weight = scale.expand_as(masked_embed_weight) * masked_embed_weight
+
+    padding_idx = embed.padding_idx
+    if padding_idx is None:
+        padding_idx = -1
+
+    x = torch.nn.functional.embedding(words, masked_embed_weight,
+        padding_idx, embed.max_norm, embed.norm_type,
+        embed.scale_grad_by_freq, embed.sparse
+    )
+    return x
 
 # model
 class Model(nn.Module):
@@ -88,14 +142,23 @@ class Model(nn.Module):
         self.hidden_size = hidden_size
 
         self.embedding = nn.Embedding(self.vocab_size, self.embedding_dim)
-        self.rnn = nn.RNN(self.embedding_dim, self.hidden_size, batch_first=True)
+        self.lstm = nn.LSTM(self.embedding_dim, self.hidden_size, num_layers=3, batch_first=True,
+                            dropout=0.2)
+        self.locked_dropout = LockedDropout(0.2)
         self.linear = nn.Linear(self.hidden_size, self.vocab_size)
+
+        # weight tying
+        # self.linear.weight = self.embedding.weight 
         
 
     def forward(self, x): # 2, 3
         # Feel free to add extra arguments to forward (like an argument to pass in the hiddens)
-        x = self.embedding(x) # 2, 3, 64
-        x, _ = self.rnn(x) # 2, 3, 128
+        # x = self.embedding(x) # 2, 3, 64
+        x = embedded_dropout(self.embedding, x, 0.2)
+
+        #x = self.locked_dropout(x)
+        x, _ = self.lstm(x) # 2, 3, 128
+        # x = self.locked_dropout(x)
         x = self.linear(x) # 2, 3, 33278
 
         return x
@@ -114,6 +177,8 @@ class TestLanguageModel:
 
         inp = torch.LongTensor(inp).to(device) 
         output = model(inp)
+        output = output[:, -1, :]
+        output = output.squeeze(1)
         predictions = output.detach().cpu().numpy()
 
         return predictions
@@ -168,7 +233,7 @@ class Trainer:
         
         # TODO: Define your optimizer and criterion here
         # feel free to define a learning rate scheduler as well if you want
-        self.optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, amsgrad=True, weight_decay=5e-6)
+        self.optimizer = torch.optim.AdamW(model.parameters(), lr=2e-3, amsgrad=True, weight_decay=1e-6)
         self.criterion = nn.CrossEntropyLoss()
 
     def train(self):
@@ -280,6 +345,7 @@ for i in loader:
     break
 
 model = Model(len(vocab), embedding_dim=EMB_DIM, hidden_size=HIDDEN_SIZE)
+model = model.to(device)
 
 trainer = Trainer(
     model=model, 
@@ -308,4 +374,4 @@ plt.legend()
 plt.savefig("results.png")
 
 # see generated output
-print (trainer.generated[-1]) # get last generated output
+# print (trainer.generated[-1]) # get last generated output
