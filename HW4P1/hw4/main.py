@@ -40,7 +40,7 @@ class DataLoaderForLanguageModeling(DataLoader):
         TODO: Define data loader logic here
     """
     def __init__(self, dataset, batch_size, shuffle=True):
-        self.dataset = dataset#[:1] # TODO
+        self.dataset = dataset[:1] # TODO
         self.batch_size = batch_size # TODO
         self.shuffle = shuffle # TODO 
 
@@ -193,20 +193,18 @@ class TestLanguageModel:
             :return: generated words (batch size, forward)
         """        
         model.eval()
-        generated = []
         generated_logits = []
 
-        inp = torch.LongTensor(inp).to(device)
-        output = model(inp)
-        generated_logits.append(output.detach().cpu().numpy())
+        for i in range(forward):
+            inp = torch.LongTensor(inp).to(device)
+            predictions = TestLanguageModel.predict(inp, model)
+            predictions = np.argmax(predictions, 1)
+            predictions = predictions.reshape(predictions.shape[0],1)
 
-        # for i in range(forward):
-        #     output = model(output)
-        #     generated_logits.append(output.detach().cpu().numpy())
+            generated_logits.append(predictions)
+            inp = np.concatenate((inp[:, :-1], predictions), axis=1)
 
-        # generated_logits = np.concatenate(generated_logits, axis=1)
-        # generated = np.argmax(generated_logits, axis=2)
-
+        generated_logits = np.concatenate(generated_logits, axis=1)
         return generated_logits
 
 
@@ -303,17 +301,17 @@ class Trainer:
         predictions_test = TestLanguageModel.predict(fixtures_pred_test['inp'], self.model) # get predictions
         self.predictions_test.append(predictions_test)
 
-        # # Generation
-        # generated_logits = TestLanguageModel.generate(fixtures_gen, 10, self.model) # generated predictions for 10 words
-        # generated_logits_test = TestLanguageModel.generate(fixtures_gen_test, 10, self.model)
+        # Generation
+        generated_logits = TestLanguageModel.generate(fixtures_gen, 10, self.model) # generated predictions for 10 words
+        generated_logits_test = TestLanguageModel.generate(fixtures_gen_test, 10, self.model)
         
-        # generated = test_generation(fixtures_gen, generated_logits, vocab)
-        # generated_test = test_generation(fixtures_gen_test, generated_logits_test, vocab)
+        generated = test_generation(fixtures_gen, generated_logits, vocab)
+        generated_test = test_generation(fixtures_gen_test, generated_logits_test, vocab)
         
-        # self.generated.append(generated)
-        # self.generated_test.append(generated_test)
-        # self.generated_logits.append(generated_logits)
-        # self.generated_logits_test.append(generated_logits_test)
+        self.generated.append(generated)
+        self.generated_test.append(generated_test)
+        self.generated_logits.append(generated_logits)
+        self.generated_logits_test.append(generated_logits_test)
 
         return nll
 
@@ -324,12 +322,12 @@ class Trainer:
             model_path)
         np.save(os.path.join('experiments', self.run_id, 'predictions-{}.npy'.format(self.epochs)), self.predictions[-1])
         np.save(os.path.join('experiments', self.run_id, 'predictions-test-{}.npy'.format(self.epochs)), self.predictions_test[-1])
-        # np.save(os.path.join('experiments', self.run_id, 'generated_logits-{}.npy'.format(self.epochs)), self.generated_logits[-1])
-        # np.save(os.path.join('experiments', self.run_id, 'generated_logits-test-{}.npy'.format(self.epochs)), self.generated_logits_test[-1])
-        # with open(os.path.join('experiments', self.run_id, 'generated-{}.txt'.format(self.epochs)), 'w') as fw:
-        #     fw.write(self.generated[-1])
-        # with open(os.path.join('experiments', self.run_id, 'generated-{}-test.txt'.format(self.epochs)), 'w') as fw:
-        #     fw.write(self.generated_test[-1])
+        np.save(os.path.join('experiments', self.run_id, 'generated_logits-{}.npy'.format(self.epochs)), self.generated_logits[-1])
+        np.save(os.path.join('experiments', self.run_id, 'generated_logits-test-{}.npy'.format(self.epochs)), self.generated_logits_test[-1])
+        with open(os.path.join('experiments', self.run_id, 'generated-{}.txt'.format(self.epochs)), 'w') as fw:
+            fw.write(self.generated[-1])
+        with open(os.path.join('experiments', self.run_id, 'generated-{}-test.txt'.format(self.epochs)), 'w') as fw:
+            fw.write(self.generated_test[-1])
 
 
 
@@ -374,4 +372,4 @@ plt.legend()
 plt.savefig("results.png")
 
 # see generated output
-# print (trainer.generated[-1]) # get last generated output
+print (trainer.generated[-1]) # get last generated output
