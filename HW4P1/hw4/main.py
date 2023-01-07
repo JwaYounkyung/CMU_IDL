@@ -12,7 +12,7 @@ from tqdm import tqdm
 device = f'cuda' if torch.cuda.is_available() else 'cpu'
 
 # TODO: define other hyperparameters here
-NUM_EPOCHS = 20
+NUM_EPOCHS = 70
 BATCH_SIZE = 128
 EMB_DIM = 512
 HIDDEN_SIZE = 512
@@ -40,11 +40,11 @@ class DataLoaderForLanguageModeling(DataLoader):
         TODO: Define data loader logic here
     """
     def __init__(self, dataset, batch_size, shuffle=True):
-        self.dataset = dataset[:1] # TODO
+        self.dataset = dataset#[:1] # TODO
         self.batch_size = batch_size # TODO
         self.shuffle = shuffle # TODO 
 
-        self.seq_length = 70
+        self.seq_length = 100
     
     def __len__(self):
         return len(self.dataset) // self.batch_size
@@ -148,20 +148,23 @@ class Model(nn.Module):
         self.linear = nn.Linear(self.hidden_size, self.vocab_size)
 
         # weight tying
-        # self.linear.weight = self.embedding.weight 
+        self.linear.weight = self.embedding.weight 
         
 
-    def forward(self, x): # 2, 3
+    def forward(self, x, h=None): # 2, 3
         # Feel free to add extra arguments to forward (like an argument to pass in the hiddens)
         # x = self.embedding(x) # 2, 3, 64
         x = embedded_dropout(self.embedding, x, 0.2)
 
-        #x = self.locked_dropout(x)
-        x, _ = self.lstm(x) # 2, 3, 128
-        # x = self.locked_dropout(x)
+        x = self.locked_dropout(x)
+        if h:
+            x, h = self.lstm(x, h)
+        else:
+            x, h = self.lstm(x)
+        x = self.locked_dropout(x)
         x = self.linear(x) # 2, 3, 33278
 
-        return x
+        return x, h
 
 
 class TestLanguageModel:
@@ -173,10 +176,9 @@ class TestLanguageModel:
             :return: a np.ndarray of logits
         """
         model.eval()
-        predictions = []
 
         inp = torch.LongTensor(inp).to(device) 
-        output = model(inp)
+        output, _ = model(inp)
         output = output[:, -1, :]
         output = output.squeeze(1)
         predictions = output.detach().cpu().numpy()
@@ -194,18 +196,16 @@ class TestLanguageModel:
         """        
         model.eval()
         generated_logits = []
+        h = None
 
+        inp = torch.LongTensor(inp).to(device) 
+        
         for i in range(forward):
-            inp = torch.LongTensor(inp).to(device)
-            predictions = TestLanguageModel.predict(inp, model)
-            predictions = np.argmax(predictions, 1)
-            predictions = predictions.reshape(predictions.shape[0],1)
-
-            generated_logits.append(predictions)
-            inp = np.concatenate((inp[:, :-1], predictions), axis=1)
-
-        generated_logits = np.concatenate(generated_logits, axis=1)
-        return generated_logits
+            output, h = model(inp, h)
+            inp = torch.argmax(output, dim=2)[:,-1].unsqueeze(1)
+            generated_logits.append(inp)
+        
+        return torch.cat(generated_logits, dim=1).cpu().detach().numpy()
 
 
 # model trainer
@@ -267,7 +267,7 @@ class Trainer:
         inputs = torch.LongTensor(inputs).to(device)
         targets = torch.LongTensor(targets).to(device)
         
-        outputs = self.model(inputs) # 2, 3, len(vocab)
+        outputs, _ = self.model(inputs) # 2, 3, len(vocab)
         outputs = outputs.view(-1, outputs.size(2))
 
         # 3. Compute loss
